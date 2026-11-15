@@ -6,6 +6,7 @@
  *   node tools/shots.mjs name yawDeg pitchDeg [fov] [simSeconds]   one picture
  *
  * yaw: degrees to the LEFT of straight ahead. pitch: degrees up.
+ * SHOTS_EYE=x,y,z puts the camera somewhere else than on the ledge (to look at the ledge itself).
  * SHOTS_GPU=1 uses the machine's GPU instead of the software renderer (faster, same picture).
  */
 import { mkdir } from 'node:fs/promises';
@@ -54,11 +55,12 @@ try {
   await page.waitForFunction(() => window.__dragons && window.__dragons.ready, null, { timeout: 60000 });
   for (const [name, yaw, pitch, fov, sim] of shots) {
     const info = await page.evaluate(
-      async ({ yaw, pitch, fov, sim }) => {
+      async ({ yaw, pitch, fov, sim, eye }) => {
         const d = window.__dragons;
         if (d.setFlatShot) d.setFlatShot();
         if (sim !== undefined && d.seek) d.seek(sim);
         d.view.follow = false;
+        if (eye) d.stage.camera.position.set(eye[0], eye[1], eye[2]);
         d.view.set((yaw * Math.PI) / 180, (pitch * Math.PI) / 180);
         d.stage.camera.fov = fov;
         d.stage.camera.updateProjectionMatrix();
@@ -70,7 +72,7 @@ try {
         const r = d.stage.renderer.info.render;
         return { calls: r.calls, triangles: r.triangles, buildMs: Math.round(d.buildMs) };
       },
-      { yaw, pitch, fov, sim }
+      { yaw, pitch, fov, sim, eye: process.env.SHOTS_EYE ? process.env.SHOTS_EYE.split(',').map(Number) : null }
     );
     const file = path.join(OUT, 'shot-' + name + '.png');
     await page.screenshot({ path: file });

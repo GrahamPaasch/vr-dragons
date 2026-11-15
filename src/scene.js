@@ -10,17 +10,22 @@
  */
 
 import {
-  THREE, makeShared, worldMaterial, skyMaterial, sunMaterial, waterMaterial,
+  THREE, makeShared, worldMaterial, skyMaterial, sunMaterial, waterMaterial, leafMaterial,
 } from './shaders.js';
 import * as W from './world.js';
 import { buildTerrain } from './terrain.js';
 import { bakeReflection, bakeNoise } from './reflection.js';
 import { MeshBuilder } from './meshbuilder.js';
-import { hash2 } from './rng.js';
+import { buildLedge } from './ledge.js';
+import { hash2, makeRng } from './rng.js';
 
 export { THREE };
 
 export const WORLD_SEED = 20261115;
+
+/** How many leaves are in the air around the ledge, and the box they fall through (metres). */
+const LEAF_COUNT = 190;
+export const LEAF_BOX = { min: [-10.5, -7, -11.5], size: [20, 19, 19] };
 
 /** Azimuth slices the forest is split into, so trees behind the viewer are not drawn. */
 const FOREST_SECTORS = 6;
@@ -89,6 +94,8 @@ export class Stage {
     this.terrain = clock('terrain', () => this.buildTerrain());
     clock('water', () => this.buildWater(o.reflectionSize || 256));
     clock('forest', () => this.buildForest(o.forestDensity || 1));
+    clock('ledge', () => this.buildLedge());
+    clock('leaves', () => this.buildLeaves(o.leaves === undefined ? LEAF_COUNT : o.leaves));
   }
 
   // -------------------------------------------------------------------------------------------
@@ -365,6 +372,64 @@ export class Stage {
     }
     this.treeCount = count;
     this.trees = trees;
+  }
+
+  /** The trees, boulders and fallen leaves close to the viewer: one mesh. */
+  buildLedge() {
+    const built = buildLedge(this.terrain.surfaceNear(40), WORLD_SEED);
+    const mesh = new THREE.Mesh(toGeometry(built.arrays), worldMaterial(this.shared, { lit: true, sway: true }));
+    // Its trees stand on every side of the viewer: there is no direction in which it is out of sight.
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 8;
+    this.scene.add(mesh);
+    this.ledge = mesh;
+    this.heroTrees = built.trees;
+    this.ledgeTriangles = built.triangles;
+  }
+
+  /** The leaves coming down past the ledge: one instanced draw call, moved by its shader. */
+  buildLeaves(count) {
+    const rng = makeRng(WORLD_SEED + 77);
+    const g = new THREE.InstancedBufferGeometry();
+    // A kite folded a little along its midrib: stem, tip, and the two sides lifted.
+    const S = [-1.1, 0, 0];
+    const T = [1.3, 0, 0];
+    const L = [0.1, 0.24, 0.85];
+    const R = [0.1, 0.24, -0.85];
+    const builder = new MeshBuilder();
+    builder.tri(S, L, T, [1, 1, 1]).tri(S, T, R, [1, 1, 1]);
+    const a = builder.arrays();
+    g.setAttribute('position', new THREE.BufferAttribute(a.position, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(a.normal, 3));
+    const seed = new Float32Array(count * 4);
+    const leaf = new Float32Array(count * 4);
+    const colours = [W.LEAF.scarlet, W.LEAF.flame, W.LEAF.flame, W.LEAF.orange, W.LEAF.orange, W.LEAF.gold, W.LEAF.gold, W.LEAF.yellow, W.LEAF.russet];
+    for (let i = 0; i < count; i++) {
+      seed[i * 4] = rng();
+      seed[i * 4 + 1] = rng();
+      seed[i * 4 + 2] = rng();
+      seed[i * 4 + 3] = rng();
+      const c = colours[rng.int(colours.length)];
+      const v = rng.range(0.75, 1.15);
+      leaf[i * 4] = c[0] * v;
+      leaf[i * 4 + 1] = c[1] * v;
+      leaf[i * 4 + 2] = c[2] * v;
+      leaf[i * 4 + 3] = rng.range(0.045, 0.07);
+    }
+    g.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 4));
+    g.setAttribute('aLeaf', new THREE.InstancedBufferAttribute(leaf, 4));
+    g.instanceCount = count;
+    const mesh = new THREE.Mesh(g, leafMaterial(this.shared, LEAF_BOX));
+    mesh.frustumCulled = false; // they are all round the viewer
+    mesh.renderOrder = 9;
+    mesh.userData.full = count;
+    this.scene.add(mesh);
+    this.leaves = mesh;
+  }
+
+  /** Draw only this fraction of the leaves in the air. */
+  setLeafFraction(fraction) {
+    if (this.leaves) this.leaves.geometry.instanceCount = Math.max(0, Math.round(this.leaves.userData.full * fraction));
   }
 
   /** Draw only this fraction of the forest (1 = all of it). Used to hold the frame rate. */

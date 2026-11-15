@@ -32,7 +32,10 @@ export function makeShared() {
     uFog: { value: new THREE.Vector4(FOG.haze, FOG.mist, FOG.falloff, FOG.base) },
     uExposure: { value: LIGHT.exposure },
     uTime: { value: 0 },
-    uWind: { value: new THREE.Vector2(0.8, 0.45) }, // direction and strength of the sway
+    // Direction and strength of the sway. The wind comes over the plateau from behind the
+    // viewer's left shoulder and blows out across the valley, so the big maple's leaves cross
+    // in front of the ledge.
+    uWind: { value: new THREE.Vector2(0.8, -0.38) },
   };
 }
 
@@ -258,6 +261,76 @@ export function waterMaterial(shared, reflection, noise, bounds) {
         gl_FragColor = vec4(mix(c, vFog.rgb, vFog.a), 1.0);
       }
     `,
+  });
+}
+
+/**
+ * Falling leaves: one instanced kite. Each leaf has a place in a box around the viewer and
+ * falls, drifts downwind and rocks from side to side as a function of time alone, so they cost
+ * nothing to animate. Where one leaves the box it comes back in on the far side, shrunk to
+ * nothing at the faces of the box so that it never pops. A leaf that would touch the viewer's
+ * face shrinks away too.
+ *
+ *   aSeed  x, y, z: place in the box (0..1); w: a random number that sets everything else
+ *   aLeaf  r, g, b (linear); w: size in metres
+ */
+export function leafMaterial(shared, box) {
+  return new THREE.ShaderMaterial({
+    uniforms: Object.assign(
+      {
+        uBoxMin: { value: new THREE.Vector3(box.min[0], box.min[1], box.min[2]) },
+        uBoxSize: { value: new THREE.Vector3(box.size[0], box.size[1], box.size[2]) },
+      },
+      shared
+    ),
+    side: THREE.DoubleSide,
+    vertexShader: /* glsl */ `
+      ${COMMON}
+      uniform vec3 uBoxMin;
+      uniform vec3 uBoxSize;
+      uniform vec2 uWind;
+      attribute vec4 aSeed;
+      attribute vec4 aLeaf;
+      varying vec3 vColor;
+
+      vec3 turnX(vec3 p, float a) { float c = cos(a); float s = sin(a); return vec3(p.x, c * p.y - s * p.z, s * p.y + c * p.z); }
+      vec3 turnY(vec3 p, float a) { float c = cos(a); float s = sin(a); return vec3(c * p.x + s * p.z, p.y, c * p.z - s * p.x); }
+      vec3 turnZ(vec3 p, float a) { float c = cos(a); float s = sin(a); return vec3(c * p.x - s * p.y, s * p.x + c * p.y, p.z); }
+
+      void main() {
+        float r1 = aSeed.w;
+        float r2 = fract(r1 * 7.31);
+        float r3 = fract(r1 * 13.7);
+        float r4 = fract(r1 * 29.3);
+        // A leaf falls in swings: it slides to one side, tips, and slides back.
+        float swing = uTime * (1.5 + 1.3 * r2) + r1 * 6.2832;
+        vec3 q = aSeed.xyz * uBoxSize;
+        q.y -= uTime * (0.55 + 0.5 * r3);
+        q.xz += uWind * (uTime * (0.9 + 0.7 * r4));
+        q.x += sin(swing) * 0.32;
+        q.z += cos(swing * 0.83 + 1.7) * 0.26;
+        q.y += 0.07 * cos(2.0 * swing);
+        q = mod(q, uBoxSize);
+        vec3 center = uBoxMin + q;
+        vec3 edge = min(q, uBoxSize - q);
+        float show = smoothstep(0.0, 1.3, min(edge.x, min(edge.y, edge.z)));
+        show *= smoothstep(0.4, 1.0, distance(center, cameraPosition));
+        // One leaf in three tumbles end over end; the others rock.
+        float tumble = step(0.66, r2) * uTime * (2.5 + 3.0 * r3);
+        float roll = cos(swing) * 1.0 + tumble;
+        float tip = sin(swing * 0.83 + 1.7) * 0.55;
+        float yaw = r4 * 6.2832 + uTime * (0.4 + 0.8 * r1);
+        vec3 p = turnY(turnZ(turnX(position, roll), tip), yaw);
+        vec3 n = turnY(turnZ(turnX(normal, roll), tip), yaw);
+        vec4 wp = vec4(center + p * (aLeaf.w * show), 1.0);
+        // Thin enough for the low sun to shine through: lit from either side.
+        float sun = 0.3 + 0.7 * abs(dot(n, uSunDir));
+        vec3 c = aLeaf.rgb * (mix(uBounceColor, uSkyColor, n.y * 0.5 + 0.5) + uSunColor * (sun * 0.85));
+        vColor = dvDisplay(dvHaze(c, wp.xyz, 1.0));
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: FLAT_FRAGMENT,
   });
 }
 

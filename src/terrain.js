@@ -30,9 +30,17 @@ export function terrainRings() {
   return { radii, counts };
 }
 
-/** How far the far "ground" is lifted to stand for the canopy top (0 near, most of a tree far). */
+/**
+ * How far the far "ground" is lifted to stand for the canopy top (0 near, most of a tree far).
+ * Behind the viewer the same is done much nearer, about 100 m back: from the ledge the plateau
+ * forest is seen from the side, and without something solid behind the last trees that are
+ * drawn, the sky would show between their trunks.
+ */
 function canopyLift(x, z, r) {
-  if (r < FOREST_RANGE.farA) return 0;
+  if (r < FOREST_RANGE.farA) {
+    if (z < 8 || r < 94) return 0;
+    return 0.85 * CANOPY * smoothstep(94, 112, r) * smoothstep(8, 34, z) * smoothstep(0.3, 0.7, forestDensity(x, z));
+  }
   return 0.7 * CANOPY * smoothstep(FOREST_RANGE.farA, FOREST_RANGE.farA * 1.4, r) * smoothstep(0.3, 0.7, forestDensity(x, z));
 }
 
@@ -108,9 +116,10 @@ export function buildTerrain(sunHeight) {
       ny = -ny;
       nz = -nz;
     }
-    const slope = Math.hypot(nx, nz) / Math.max(ny, 0.05);
-    groundColor(cx, cz, cy, slope, albedo);
     const lift = canopyLift(cx, cz, r);
+    // Lifted ground stands for leaves: it must not turn to bare rock where it is steep.
+    const slope = lift > 0.5 ? 0.3 : Math.hypot(nx, nz) / Math.max(ny, 0.05);
+    groundColor(cx, cz, cy, slope, albedo);
     // Canopy seen from far off is lit like a rough, upward-facing surface.
     const soft = lift > 0 ? 0.55 : 0;
     const lx = nx * (1 - soft);
@@ -190,7 +199,67 @@ export function buildTerrain(sunHeight) {
     return ground(x, z);
   };
 
+  /**
+   * The same for the ground close to the viewer, where the mesh is loose and fine: the exact
+   * height of the drawn triangles, so that a pebble or a fallen leaf lies ON the rock. Returns a
+   * function (x, z) -> y that falls back to ground() outside `radius`.
+   */
+  const surfaceNear = (radius) => {
+    const tris = [];
+    for (let i = 0; i < position.length; i += 9) {
+      const cx = (position[i] + position[i + 3] + position[i + 6]) / 3;
+      const cz = (position[i + 2] + position[i + 5] + position[i + 8]) / 3;
+      if (Math.hypot(cx, cz) < radius + 4) tris.push(i);
+    }
+    // Buckets a metre wide, so a lookup tries a handful of triangles and not all of them.
+    const cell = 1;
+    const half = Math.ceil(radius + 6);
+    const side = 2 * half;
+    const buckets = new Array(side * side);
+    for (const i of tris) {
+      const x0 = Math.floor(Math.min(position[i], position[i + 3], position[i + 6]) / cell) + half;
+      const x1 = Math.floor(Math.max(position[i], position[i + 3], position[i + 6]) / cell) + half;
+      const z0 = Math.floor(Math.min(position[i + 2], position[i + 5], position[i + 8]) / cell) + half;
+      const z1 = Math.floor(Math.max(position[i + 2], position[i + 5], position[i + 8]) / cell) + half;
+      for (let bz = Math.max(z0, 0); bz <= Math.min(z1, side - 1); bz++) {
+        for (let bx = Math.max(x0, 0); bx <= Math.min(x1, side - 1); bx++) {
+          const k = bz * side + bx;
+          (buckets[k] || (buckets[k] = [])).push(i);
+        }
+      }
+    }
+    return (x, z) => {
+      if (Math.hypot(x, z) > radius) return ground(x, z);
+      const bx = Math.floor(x / cell) + half;
+      const bz = Math.floor(z / cell) + half;
+      const list = bx >= 0 && bz >= 0 && bx < side && bz < side ? buckets[bz * side + bx] : null;
+      if (list) {
+        let best = -Infinity;
+        for (const i of list) {
+          const ax = position[i];
+          const az = position[i + 2];
+          const bx1 = position[i + 3];
+          const bz1 = position[i + 5];
+          const cx = position[i + 6];
+          const cz = position[i + 8];
+          const d = (bz1 - cz) * (ax - cx) + (cx - bx1) * (az - cz);
+          if (Math.abs(d) < 1e-12) continue;
+          const w0 = ((bz1 - cz) * (x - cx) + (cx - bx1) * (z - cz)) / d;
+          const w1 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d;
+          const w2 = 1 - w0 - w1;
+          if (w0 < -1e-5 || w1 < -1e-5 || w2 < -1e-5) continue;
+          // Where the cliff overhangs itself in plan, the top surface is the one to stand on.
+          const y = w0 * position[i + 1] + w1 * position[i + 4] + w2 * position[i + 7];
+          if (y > best) best = y;
+        }
+        if (best > -Infinity) return best;
+      }
+      return ground(x, z);
+    };
+  };
+
   return {
+    surfaceNear,
     position: new Float32Array(position),
     color: new Float32Array(color),
     triangles: faces,
