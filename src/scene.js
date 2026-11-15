@@ -75,27 +75,36 @@ export class Stage {
     this.time = 0;
     this.forestFraction = 1;
     this.timings = {};
-    this.build(o);
+    this.options = o;
   }
 
-  build(o) {
-    const clock = (name, fn) => {
+  /**
+   * Build the valley. It is a few hundred milliseconds of work on a laptop and several seconds
+   * on a Quest 1, so it is done in steps with a pause between them: the page stays alive, and
+   * `say(text)` is told what is being made. Resolves when everything is in the scene.
+   */
+  async build(say) {
+    const o = this.options;
+    const step = async (name, text, fn) => {
+      if (say && text) say(text);
+      // Let the browser paint and answer before each piece of work.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       const t = performance.now();
       const out = fn();
       this.timings[name] = performance.now() - t;
       return out;
     };
     // Heights of the land with its treetops, and from them where the sun reaches.
-    this.heights = clock('heights', () => new W.HeightGrid(W.canopyHeight, 600, 192));
-    this.sunHeight = clock('shadows', () => W.buildSunHeight(this.heights, 600, 192));
-    this.farHeights = clock('farHeights', () => new W.HeightGrid(W.ground, 2000, 128));
-
-    clock('sky', () => this.buildSky());
-    this.terrain = clock('terrain', () => this.buildTerrain());
-    clock('water', () => this.buildWater(o.reflectionSize || 256));
-    clock('forest', () => this.buildForest(o.forestDensity || 1));
-    clock('ledge', () => this.buildLedge());
-    clock('leaves', () => this.buildLeaves(o.leaves === undefined ? LEAF_COUNT : o.leaves));
+    this.heights = await step('heights', 'Raising the hills\u2026', () => new W.HeightGrid(W.canopyHeight, 600, 192));
+    this.sunHeight = await step('shadows', '', () => W.buildSunHeight(this.heights, 600, 192));
+    this.farHeights = await step('farHeights', '', () => new W.HeightGrid(W.ground, 2000, 128));
+    await step('sky', '', () => this.buildSky());
+    this.terrain = await step('terrain', '', () => this.buildTerrain());
+    await step('water', 'Filling the lake\u2026', () => this.buildWater(o.reflectionSize || 256));
+    await step('forest', 'Turning the maples\u2026', () => this.buildForest(o.forestDensity || 1));
+    await step('ledge', '', () => this.buildLedge());
+    await step('leaves', '', () => this.buildLeaves(o.leaves === undefined ? LEAF_COUNT : o.leaves));
+    this.built = true;
   }
 
   // -------------------------------------------------------------------------------------------

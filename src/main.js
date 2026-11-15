@@ -15,7 +15,7 @@ import { Stage, THREE, WORLD_SEED } from './scene.js';
 import { FlatView } from './view.js';
 import { DragonView } from './dragons.js';
 import { DRAGONS } from './dragonGeometry.js';
-import { Director, ROAR_SECONDS } from './flight.js';
+import { Director, ROAR_SECONDS, floorGrid } from './flight.js';
 import { Soundscape } from './audio.js';
 import { XRControl } from './xr.js';
 import { Governor, QUALITY } from './governor.js';
@@ -63,17 +63,25 @@ let lastWhistle = -10;
 
 // ---------------------------------------------------------------------------------------------
 
-function build() {
+async function build() {
   const canvas = $('stage');
   const t0 = performance.now();
+  const say = (text) => {
+    dom.note.textContent = text;
+  };
   try {
     stage = new Stage(canvas, {});
   } catch (err) {
     showNo3D(err);
     return;
   }
+  await stage.build(say);
   view = new FlatView(stage);
   dragons = [new DragonView(stage, 0), new DragonView(stage, 1)];
+  say('Waking the dragons\u2026');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  // The map of how low a dragon may fly: worked out now, not in the first frame.
+  floorGrid();
   const seed = number('seed');
   director = new Director(DRAGONS.map((d) => ({ beat: d.beat, size: d.build.scale })), seed === undefined ? WORLD_SEED : seed);
   audio = new Soundscape({ hrtf: params.get('hrtf') !== '0', reverb: params.get('reverb') !== '0', seed: director.seed });
@@ -452,4 +460,12 @@ function fly(seconds) {
 }
 
 // Let the card paint before the valley is built: that takes a few seconds on a headset.
-requestAnimationFrame(() => setTimeout(build, 0));
+requestAnimationFrame(() =>
+  setTimeout(() => {
+    build().catch((err) => {
+      console.error('The valley could not be built.', err);
+      dom.note.textContent = 'Something went wrong while building the valley: ' + (err && err.message ? err.message : err);
+      window.__dragons = { ready: false, failed: true, state };
+    });
+  }, 0)
+);
