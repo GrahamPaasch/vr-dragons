@@ -1,0 +1,22 @@
+{
+  "name": "vr-dragons",
+  "version": "0.1.0",
+  "description": "Two dragons over an autumn valley: a WebXR scene for the Oculus Quest 1, with a flat-screen fallback.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "serve": "node tools/serve.mjs",
+    "smoke": "node tools/smoke.mjs",
+    "perf": "node tools/perf.mjs",
+    "shots": "node tools/shots.mjs",
+    "map": "node tools/map.mjs"
+  },
+  "devDependencies": {
+    "iwer": "2.8.0",
+    "playwright-core": "1.56.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Two Dragons, October</title>
+<style>html,body{height:100%;margin:0;background:#1a1410;overflow:hidden}#stage{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script>
+(function () {
+  var p = location.pathname;
+  var dir = p.charAt(p.length - 1) === '/' ? p : /\.html?$/i.test(p) ? p.slice(0, p.lastIndexOf('/') + 1) : p + '/';
+  var s = document.createElement('script');
+  s.type = 'module';
+  s.src = dir + 'src/main.js';
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>
