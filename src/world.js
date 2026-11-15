@@ -103,13 +103,13 @@ export const GORGE = [
  * where the dragons fly between the trees.
  */
 export const MEADOW = [
-  [-36, -62],
-  [-70, -50],
-  [-110, -62],
-  [-150, -44],
-  [-195, -30],
-  [-240, -44],
-  [-290, -30],
+  [-36, -64],
+  [-80, -54],
+  [-130, -58],
+  [-180, -44],
+  [-230, -38],
+  [-280, -36],
+  [-314, -38],
 ];
 
 export const gorgeDistance = (x, z) => polylineDistance(GORGE, x, z);
@@ -238,29 +238,60 @@ export function slopeAt(x, z) {
 export function forestDensity(x, z) {
   const dl = lakeDistance(x, z);
   if (dl < 4) return 0;
+  const r = Math.hypot(x, z);
   let f = smoothstep(4, 10, dl);
-  f *= smoothstep(10, 15, gorgeDistance(x, z));
-  f *= smoothstep(12, 19, meadowDistance(x, z));
-  f *= smoothstep(8, 13, Math.hypot(x, z));
-  // The strip of cliff just under the edge is bare rock.
+  f *= smoothstep(18, 26, gorgeDistance(x, z));
+  f *= smoothstep(18, 26, meadowDistance(x, z));
+  // Around the ledge the trees are placed by hand (HERO_TREES); the forest proper starts
+  // further back, which also leaves room for a dragon to come in low over the viewer's shoulder.
+  f *= smoothstep(z > 0 ? 27 : 8, z > 0 ? 34 : 13, r);
+  // Behind the viewer's right shoulder the plateau is a bare shelf of rock with a few trees
+  // (HERO_TREES): that is the way a dragon comes over.
+  if (z > 0 && x > -4) f *= Math.max(smoothstep(58, 68, r), 1 - smoothstep(-4, 4, x));
+  // The cliff and the fallen rock under it are bare; trees begin lower down the slope.
   const front = bluffFront(x, z);
-  if (front > -1.5 && front < 9) f *= 0;
+  if (front > -1.5) f *= smoothstep(44, 56, front);
+  // Under the ledge itself the fallen rock fans out wider: nothing grows within 60 m of it.
+  if (z < 12) f *= smoothstep(60, 72, r);
+  // Straight ahead nothing stands between the ledge and the lake.
+  if (z < 0) f *= smoothstep(0, 7, Math.abs(x) - (9 + 0.22 * -z)) + smoothstep(70, 82, -z) - smoothstep(0, 7, Math.abs(x) - (9 + 0.22 * -z)) * smoothstep(70, 82, -z);
   // A few natural clearings.
   f *= 1 - smoothstep(0.52, 0.66, fbm(x / 130 + 20, z / 130 - 6, 2) * 1.6);
   return f;
 }
 
-/** Typical treetop height above the ground. */
+/**
+ * The trees that stand close to the ledge, placed by hand: [x, z, height, crown radius, kind].
+ * The big maple leans over the viewer's left shoulder and sheds the leaves that drift past; the
+ * right side is kept open, because that is where a dragon comes over.
+ */
+export const HERO_TREES = [
+  { x: -7.5, z: 5.5, height: 15, radius: 5.6, kind: 'maple' },
+  { x: 13, z: 10.5, height: 11, radius: 3, kind: 'birch' },
+  { x: -16.5, z: 13, height: 14, radius: 6, kind: 'oak' },
+  { x: 27, z: 9, height: 19, radius: 3.4, kind: 'pine' },
+  { x: -3, z: 19, height: 13, radius: 5, kind: 'maple2' },
+  { x: 7, z: 23.5, height: 12, radius: 4.6, kind: 'oak2' },
+  { x: -24, z: 4, height: 10, radius: 3, kind: 'birch2' },
+];
+
+/** Typical treetop height above the ground, and the tallest any tree grows. */
 export const CANOPY = 17;
+export const TREE_MAX = 23;
+
+/** The top of the land as the light sees it: water, bare ground, or the forest's canopy. */
+export function canopyHeight(x, z) {
+  if (lakeDistance(x, z) < 0) return LAKE_LEVEL;
+  return ground(x, z) + CANOPY * smoothstep(0.05, 0.6, forestDensity(x, z));
+}
 
 /**
- * The lowest height a dragon may fly at here: above the water, above bare ground, above the
- * treetops in forest. The gaps (gorge, meadow) are open down to the ground.
+ * The top of everything a dragon could hit: water, bare ground, or the tallest tree that may
+ * stand here. The gaps (gorge, meadow) are open down to the ground.
  */
 export function clearHeight(x, z) {
   if (lakeDistance(x, z) < 0) return LAKE_LEVEL;
-  const g = ground(x, z);
-  return g + CANOPY * smoothstep(0.05, 0.6, forestDensity(x, z));
+  return ground(x, z) + TREE_MAX * smoothstep(0.05, 0.5, forestDensity(x, z));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -531,8 +562,8 @@ export function placeForest(seed, density) {
         let height;
         let radius;
         if (conifer) {
-          height = 15 + 11 * size;
-          radius = height * (0.17 + 0.05 * pick);
+          height = 14 + 9 * size;
+          radius = height * (0.18 + 0.05 * pick);
           if (lakeside) {
             // Tamarack: a conifer that turns gold.
             color[0] = LEAF.tamarack[0];
@@ -546,7 +577,7 @@ export function placeForest(seed, density) {
             color[2] = LEAF.pine[2] * v;
           }
         } else {
-          height = 12 + 9 * size;
+          height = 12 + 8.5 * size;
           radius = height * (0.3 + 0.1 * pick);
           canopyColor(x, z, pick, color);
         }

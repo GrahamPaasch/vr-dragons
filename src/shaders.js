@@ -261,4 +261,75 @@ export function waterMaterial(shared, reflection, noise, bounds) {
   });
 }
 
+/**
+ * A dragon. The vertex shader moves each vertex with its one or two bones (rig.js works the
+ * bones out; they arrive as three rows of four numbers each), lights it, and lets the low sun
+ * shine through the wing membranes. `mirror` makes the dimmer material used for the dragon's
+ * image in the lake.
+ */
+export function dragonMaterial(shared, bones, options) {
+  const o = options || {};
+  const defines = { DV_BONES: bones.length / 4 };
+  if (o.mirror) defines.DV_MIRROR = 1;
+  return new THREE.ShaderMaterial({
+    uniforms: Object.assign(
+      {
+        uBones: { value: bones },
+        uSunlit: { value: 1 },
+        uAlpha: { value: 0.5 },
+      },
+      shared
+    ),
+    defines,
+    vertexColors: true,
+    transparent: !!o.mirror,
+    depthWrite: !o.mirror,
+    vertexShader: /* glsl */ `
+      ${COMMON}
+      uniform vec4 uBones[DV_BONES];
+      uniform float uSunlit;
+      attribute vec4 aux;
+      varying vec3 vColor;
+
+      vec3 bonePoint(float bone, vec4 p) {
+        int i = int(bone + 0.5) * 3;
+        return vec3(dot(uBones[i], p), dot(uBones[i + 1], p), dot(uBones[i + 2], p));
+      }
+      vec3 boneDir(float bone, vec3 n) {
+        int i = int(bone + 0.5) * 3;
+        return vec3(dot(uBones[i].xyz, n), dot(uBones[i + 1].xyz, n), dot(uBones[i + 2].xyz, n));
+      }
+
+      void main() {
+        vec4 rest = vec4(position, 1.0);
+        float w = aux.z;
+        vec3 p = bonePoint(aux.x, rest) * w + bonePoint(aux.y, rest) * (1.0 - w);
+        vec3 n = boneDir(aux.x, normal) * w + boneDir(aux.y, normal) * (1.0 - w);
+        vec4 wp = modelMatrix * vec4(p, 1.0);
+        n = normalize(mat3(modelMatrix) * n);
+        float membrane = step(0.5, aux.w) * step(aux.w, 1.5);
+        float glow = step(1.5, aux.w);
+        vec3 c = color * dvLight(n, uSunlit);
+        // The sun behind a wing lights it up like a paper lantern.
+        c += color * uSunColor * (max(-dot(n, uSunDir), 0.0) * 0.9 * membrane * uSunlit);
+        c = mix(c, color * 5.0, glow);
+        #ifdef DV_MIRROR
+          c *= 0.55;
+        #endif
+        vColor = dvDisplay(dvHaze(c, wp.xyz, 1.0));
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: o.mirror
+      ? /* glsl */ `
+        uniform float uAlpha;
+        varying vec3 vColor;
+        void main() {
+          gl_FragColor = vec4(vColor, uAlpha);
+        }
+      `
+      : FLAT_FRAGMENT,
+  });
+}
+
 export { THREE, COMMON, FLAT_FRAGMENT };

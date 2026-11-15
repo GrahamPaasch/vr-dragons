@@ -81,7 +81,7 @@ export class Stage {
       return out;
     };
     // Heights of the land with its treetops, and from them where the sun reaches.
-    this.heights = clock('heights', () => new W.HeightGrid(W.clearHeight, 600, 192));
+    this.heights = clock('heights', () => new W.HeightGrid(W.canopyHeight, 600, 192));
     this.sunHeight = clock('shadows', () => W.buildSunHeight(this.heights, 600, 192));
     this.farHeights = clock('farHeights', () => new W.HeightGrid(W.ground, 2000, 128));
 
