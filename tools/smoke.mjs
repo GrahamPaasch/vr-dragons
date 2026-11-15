@@ -328,6 +328,7 @@ async function phone(browser, base) {
     await frames(page, 3);
     const box = await page.locator('#hud').boundingBox();
     assert.ok(box && box.y + box.height <= 780, 'the controls are on the screen');
+    await page.waitForTimeout(1100); // the curtain is still opening
     await page.screenshot({ path: path.join(OUT, 'phone.png') });
     assert.deepEqual(problems, []);
   });
