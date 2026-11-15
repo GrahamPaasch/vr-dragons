@@ -16,7 +16,7 @@ import * as W from './world.js';
 import { buildTerrain } from './terrain.js';
 import { bakeReflection, bakeNoise } from './reflection.js';
 import { MeshBuilder } from './meshbuilder.js';
-import { buildLedge } from './ledge.js';
+import { buildLedge, buildGrove } from './ledge.js';
 import { hash2, makeRng } from './rng.js';
 
 export { THREE };
@@ -104,6 +104,7 @@ export class Stage {
     await step('water', 'Filling the lake\u2026', () => this.buildWater(o.reflectionSize || 256));
     await step('forest', 'Turning the maples\u2026', () => this.buildForest(o.forestDensity || 1));
     await step('ledge', '', () => this.buildLedge());
+    await step('grove', '', () => this.buildGrove());
     await step('leaves', '', () => this.buildLeaves(o.leaves === undefined ? LEAF_COUNT : o.leaves));
     this.built = true;
   }
@@ -454,6 +455,17 @@ export class Stage {
     this.ledge = mesh;
     this.heroTrees = built.trees;
     this.ledgeTriangles = built.triangles;
+  }
+
+  /** The big trees at the mouth of the creek, which the dragons fly between: one mesh. */
+  buildGrove() {
+    const built = buildGrove(this.terrain.heightAt, WORLD_SEED);
+    // The same material as the ledge's trees (and so the same shader program).
+    const mesh = new THREE.Mesh(toGeometry(built.arrays), this.ledge.material);
+    mesh.renderOrder = 9;
+    this.scene.add(mesh);
+    this.grove = mesh;
+    this.groveTriangles = built.triangles;
   }
 
   /** The leaves coming down past the ledge: one instanced draw call, moved by its shader. */

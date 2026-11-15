@@ -139,6 +139,12 @@ const HILLS = [
   return { x: h[0], z: h[1], ra: h[2], rc: h[3], ux: -Math.sin(az), uz: -Math.cos(az), h: h[5], power: h[6] };
 });
 
+/** The rim of the bluff rounds off: this far back from the edge it starts, and this far down it is at the edge (metres). */
+const PROW_BACK = 1.4;
+const PROW_DROP = 0.6;
+/** The bank at the water's edge: all land stands this far above the lake (metres). */
+const SHORE_STEP = 0.7;
+
 const smax = (a, b, k) => {
   const h = Math.max(k - Math.abs(a - b), 0) / k;
   return Math.max(a, b) + h * h * k * 0.25;
@@ -149,7 +155,7 @@ const smin = (a, b, k) => -smax(-a, -b, k);
  * How far a point is outside the top of the viewer's bluff, in metres (negative: on top of it).
  * The top is a wooded plateau behind the viewer, and in front of it a narrow pulpit of rock that
  * juts out over the valley: the ledge. The edge is 2.6 m in front of the viewer and 3 m to each
- * side, so the valley can be seen straight down on three sides.
+ * side, so the valley can be seen on three sides.
  */
 export function bluffFront(x, z) {
   const k = x < 0 ? 0.0028 : 0.012;
@@ -194,14 +200,20 @@ export function ground(x, z) {
   const flat = smoothstep(5, 26, r);
   const plateau = 2.8 * noise2(x / 62 + 1.3, z / 62 + 9.1) * flat + 0.022 * Math.max(z, 0) * flat + 1.2 * fbm(x / 9, z / 9, 2) * smoothstep(9, 22, r);
   const front = bluffFront(x, z);
-  let bluff;
-  if (front <= 0) {
-    // The rock rounds off toward its rim.
-    bluff = plateau - 0.35 * smoothstep(-1.6, 0, front);
-  } else {
+  // The rock rounds off toward its rim like the prow of a boat: it starts to fall away 1.4 m
+  // back from the edge and is 0.6 m down by the edge itself, still steepening. (A level top
+  // with a sharp rim hides the valley floor from anyone standing a few steps back from it: the
+  // eye, the rim and whatever is below it are in one line.)
+  const back = clamp((front + PROW_BACK) / PROW_BACK, 0, 1);
+  let bluff = plateau - PROW_DROP * back * back;
+  if (front > 0) {
     const ledges = 1.6 * noise2(x / 7 + 3, z / 7) * smoothstep(1, 6, front);
-    bluff = plateau - 0.35 - 13 * smoothstep(0, 5, front) - 0.62 * Math.max(front - 3, 0) + ledges;
+    // Past the edge the prow's curve runs on for a stride, and then the cliff takes over.
+    bluff -= ((2 * PROW_DROP) / PROW_BACK) * Math.min(front, 1.5) + 13 * smoothstep(0, 5, front) + 0.62 * Math.max(front - 3, 0) - ledges;
   }
+  // Land stands SHORE_STEP above the water everywhere (see below); the pulpit is level with the
+  // viewer's feet, and the neck of rock behind them rises to the plateau over a few strides.
+  bluff -= SHORE_STEP * (1 - smoothstep(2.5, 11, r));
   h = smax(h, bluff, 5);
 
   // The gorge and its creek: a flat floor about 26 m wide with steep sides.
@@ -216,13 +228,14 @@ export function ground(x, z) {
   // Ease the land down to the water, and drop the bed away under it.
   if (dl > 0) {
     const s = smoothstep(0, 42, dl);
-    h = LAKE_LEVEL + (h - LAKE_LEVEL) * s + 0.7 * smoothstep(0, 6, dl);
+    h = LAKE_LEVEL + (h - LAKE_LEVEL) * s + SHORE_STEP * smoothstep(0, 6, dl);
   } else {
     h = LAKE_LEVEL + Math.max(dl * 0.4, -9);
   }
 
-  // The ledge itself: level rock where the viewer stands.
-  if (r < 2.4) h = lerp(0, h, smoothstep(1.2, 2.4, r));
+  // The ledge itself: level rock where the viewer stands. (It is level there already; this
+  // only takes out the last few millimetres.)
+  if (r < 1.6) h = lerp(0, h, smoothstep(1.1, 1.6, r));
   return h;
 }
 
@@ -257,32 +270,109 @@ export function forestDensity(x, z) {
   if (z < 0) f *= smoothstep(0, 7, Math.abs(x) - (9 + 0.22 * -z)) + smoothstep(70, 82, -z) - smoothstep(0, 7, Math.abs(x) - (9 + 0.22 * -z)) * smoothstep(70, 82, -z);
   // A few natural clearings.
   f *= 1 - smoothstep(0.52, 0.66, fbm(x / 130 + 20, z / 130 - 6, 2) * 1.6);
+  // Nothing of the forest stands against the trunk of one of the big trees by the creek (the
+  // smaller trees do grow under their crowns).
+  if (f > 0) f *= smoothstep(4, 8, groveDistance(x, z));
   return f;
 }
 
 /**
  * The trees that stand close to the ledge, placed by hand: [x, z, height, crown radius, kind].
  * The big maple leans over the viewer's left shoulder and sheds the leaves that drift past; the
- * right side is kept open, because that is where a dragon comes over.
+ * right side is kept open, because that is where a dragon comes over. In particular nothing
+ * stands within 13 m of the line 11 m to the viewer's right, from the rim to 30 m back: a
+ * dragon that is called goes by along it, low enough to be watched all the way (flight.js,
+ * planPass).
  */
 export const HERO_TREES = [
   { x: -7.5, z: 5.5, height: 15, radius: 5.6, kind: 'maple' },
-  { x: 18.5, z: 13.5, height: 11, radius: 3, kind: 'birch' },
+  { x: 25, z: 25, height: 11, radius: 3, kind: 'birch' },
   { x: -16.5, z: 13, height: 14, radius: 6, kind: 'oak' },
   { x: 27, z: 9, height: 19, radius: 3.4, kind: 'pine' },
   { x: -3, z: 19, height: 13, radius: 5, kind: 'maple2' },
-  { x: 7, z: 23.5, height: 12, radius: 4.6, kind: 'oak2' },
+  { x: 4, z: 28, height: 12, radius: 4.6, kind: 'oak2' },
   { x: -24, z: 4, height: 10, radius: 3, kind: 'birch2' },
 ];
 
-/** Typical treetop height above the ground, and the tallest any tree grows. */
+/**
+ * The big trees at the mouth of the creek: old sugar maples, oaks and white pines that stand
+ * nearly twice as tall as the forest round them, a row on each bank. The creek's first hundred
+ * metres run between them, and that is the gap in the trees which can be WATCHED from the
+ * ledge: 55 to 120 m off to the front right, the crowns between 8 and 20 degrees below eye
+ * level. The dragons fly through at the height of the crowns (the lane 'narrows' in flight.js),
+ * behind the row on the near bank, and are seen between its trees.
+ *
+ * Placed by hand, as the trees by the ledge are: { x, z, height: where the top is (metres above
+ * the ledge, so all of these are negative), radius of the crown, kind }. Each stands at least
+ * 21 m from the middle of the creek, which leaves the lane 30 m of clear air between the crowns.
+ */
+export const GROVE = [
+  // The near bank, from the lake end. Seen from the ledge the first two stand in front of the
+  // creek with a gap between them and a gap after: a dragon flying up the creek is in the
+  // open, behind the maple, out, behind the gold one, and out again.
+  { x: 27.5, z: -43.5, height: -9.5, radius: 8.5, kind: 'elderMaple' },
+  { x: 54, z: -41.5, height: -8.5, radius: 8, kind: 'elderGold' },
+  { x: 76.5, z: -29.5, height: -6, radius: 5.5, kind: 'whitePine' },
+  { x: 89, z: -15, height: -9, radius: 8.5, kind: 'elderOak' },
+  { x: 97, z: 6, height: -10, radius: 8, kind: 'elderMaple2' },
+  // The far bank: what is seen behind the dragons, through the gaps.
+  { x: 46, z: -100, height: -13, radius: 5, kind: 'farPine' },
+  { x: 79, z: -88, height: -12, radius: 7.5, kind: 'farGold' },
+  { x: 96, z: -77, height: -9, radius: 5, kind: 'farPine2' },
+  { x: 117.5, z: -63.5, height: -12.5, radius: 7.5, kind: 'farMaple' },
+];
+
+/** A circle that holds every tree of the grove, crowns and all: nothing outside it need ask. */
+export const GROVE_REACH = (() => {
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let z0 = Infinity;
+  let z1 = -Infinity;
+  for (const t of GROVE) {
+    x0 = Math.min(x0, t.x);
+    x1 = Math.max(x1, t.x);
+    z0 = Math.min(z0, t.z);
+    z1 = Math.max(z1, t.z);
+  }
+  const x = (x0 + x1) / 2;
+  const z = (z0 + z1) / 2;
+  let radius = 0;
+  for (const t of GROVE) radius = Math.max(radius, Math.hypot(t.x - x, t.z - z) + t.radius);
+  return { x, z, radius };
+})();
+
+/** How far a point is from the nearest trunk in the grove (metres); Infinity well away from it. */
+export function groveDistance(x, z, margin) {
+  if (Math.hypot(x - GROVE_REACH.x, z - GROVE_REACH.z) > GROVE_REACH.radius + (margin || 12)) return Infinity;
+  let best = Infinity;
+  for (let i = 0; i < GROVE.length; i++) {
+    const d = Math.hypot(x - GROVE[i].x, z - GROVE[i].z);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/** The top of the grove's leaves over a point, or -Infinity where there are none. */
+export function groveTop(x, z) {
+  if (Math.hypot(x - GROVE_REACH.x, z - GROVE_REACH.z) > GROVE_REACH.radius) return -Infinity;
+  let top = -Infinity;
+  for (let i = 0; i < GROVE.length; i++) {
+    const t = GROVE[i];
+    const d = Math.hypot(x - t.x, z - t.z) / t.radius;
+    // A dome: full height over the trunk, a third of the crown lower at its edge.
+    if (d < 1) top = Math.max(top, t.height - 4.5 * d * d);
+  }
+  return top;
+}
+
+/** Typical treetop height above the ground, and the tallest any tree of the forest grows. */
 export const CANOPY = 17;
 export const TREE_MAX = 23;
 
 /** The top of the land as the light sees it: water, bare ground, or the forest's canopy. */
 export function canopyHeight(x, z) {
   if (lakeDistance(x, z) < 0) return LAKE_LEVEL;
-  return ground(x, z) + CANOPY * smoothstep(0.05, 0.6, forestDensity(x, z));
+  return Math.max(ground(x, z) + CANOPY * smoothstep(0.05, 0.6, forestDensity(x, z)), groveTop(x, z));
 }
 
 /**
@@ -291,7 +381,7 @@ export function canopyHeight(x, z) {
  */
 export function clearHeight(x, z) {
   if (lakeDistance(x, z) < 0) return LAKE_LEVEL;
-  return ground(x, z) + TREE_MAX * smoothstep(0.05, 0.5, forestDensity(x, z));
+  return Math.max(ground(x, z) + TREE_MAX * smoothstep(0.05, 0.5, forestDensity(x, z)), groveTop(x, z));
 }
 
 // ---------------------------------------------------------------------------------------------

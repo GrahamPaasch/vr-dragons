@@ -20,7 +20,8 @@
  */
 
 import {
-  clearHeight, ground, forestDensity, lakeDistance, lakePoint, LAKE, LAKE_LEVEL, TREE_MAX, HERO_TREES, HeightGrid,
+  clearHeight, ground, forestDensity, lakeDistance, lakePoint, LAKE, LAKE_LEVEL, TREE_MAX, HERO_TREES, GROVE, GROVE_REACH, HeightGrid,
+  SUN_DIR,
 } from './world.js';
 import { makeRng, clamp, lerp, smoothstep } from './rng.js';
 
@@ -38,6 +39,8 @@ export const VIEWER = [0, 1.62, 0];
 export const KEEP_OUT = 9;
 /** The flight floor's dome over the viewer is a little bigger, because a dragon follows the floor loosely. */
 const DOME = KEEP_OUT + 1.2;
+/** A dragon within this of the viewer is close enough to be worth watching (metres). */
+export const NEAR_RANGE = 80;
 
 const wrap = (a) => {
   let x = a % TAU;
@@ -55,6 +58,10 @@ const wrap = (a) => {
  */
 /** How far out from a crown by the ledge the body keeps, for its wings (metres). */
 const WING_ROOM = 5.5;
+/** Beyond this far from the viewer none of the trees by the ledge can count (metres). */
+const HERO_REACH = HERO_TREES.reduce((most, t) => Math.max(most, Math.hypot(t.x, t.z) + t.radius), 0) + WING_ROOM + 13;
+/** Beyond this far from the grove's last crown none of its trees can count (metres): a wing's room, and the 13 m the limit takes to fall from a treetop to the creek. */
+const GROVE_ROOM = WING_ROOM + 13;
 const FLOOR_HALF = 470;
 const FLOOR_STEP = 5;
 let floorCache = null;
@@ -112,7 +119,7 @@ export function flightFloor(x, z) {
   if (Math.abs(x) < FLOOR_HALF && Math.abs(z) < FLOOR_HALF) h = floorGrid().at(x, z);
   else h = clearHeight(x, z) + 6.5;
   const r2 = x * x + z * z;
-  if (r2 < 40 * 40) {
+  if (r2 < HERO_REACH * HERO_REACH) {
     for (let i = 0; i < HERO_TREES.length; i++) {
       const t = HERO_TREES[i];
       const d = Math.hypot(x - t.x, z - t.z);
@@ -125,6 +132,19 @@ export function flightFloor(x, z) {
     if (r2 < DOME * DOME) {
       const dome = VIEWER[1] + Math.sqrt(DOME * DOME - r2) + 0.3;
       if (dome > h) h = dome;
+    }
+  }
+  // The big trees by the creek, by the same rule. (The forest's grid above knows nothing of
+  // them: they stand far taller than it allows for.)
+  const gx = x - GROVE_REACH.x;
+  const gz = z - GROVE_REACH.z;
+  const reach = GROVE_REACH.radius + GROVE_ROOM;
+  if (gx * gx + gz * gz < reach * reach) {
+    for (let i = 0; i < GROVE.length; i++) {
+      const t = GROVE[i];
+      const d = Math.hypot(x - t.x, z - t.z);
+      const top = t.height + 3 - Math.max(d - t.radius - WING_ROOM, 0) * 3;
+      if (top > h) h = top;
     }
   }
   return h;
@@ -152,8 +172,10 @@ export const NODES = {
 export class Lane {
   /**
    * points: [x, y, z, speed (m/s), tight (0 or 1)] between the two nodes, which are added here.
-   * tight marks places with little room (the gaps in the trees, close to the viewer): the
-   * dragons fly those in single file. options: { weight, gap, first }.
+   * tight marks places with no room to either side (the gaps in the trees, the dive past the
+   * viewer's shoulder): the dragons fly those in single file. A place with rock on one side and
+   * open air on the other (the front of the ledge) is not tight: see Director.step.
+   * options: { weight, near, away, kin }.
    */
   constructor(name, from, to, points, options) {
     const o = options || {};
@@ -163,6 +185,8 @@ export class Lane {
     this.weight = o.weight === undefined ? 1 : o.weight;
     this.gap = o.gap || 0; // how far apart the pair should be here, if the lane cares
     this.near = !!o.near; // comes close to the viewer
+    this.away = !!o.away; // goes a long way off, and stays there a while
+    this.kin = o.kin || ''; // lanes that end the same way share a name here
     const a = NODES[from];
     const b = NODES[to];
     const speedIn = points.length ? points[0][3] : 21;
@@ -216,6 +240,8 @@ export class Lane {
     // a bank of PLAN_BANK can turn at. (So a dragon slows into a tight turn, as a bird does.)
     this.tightest = Infinity; // the smallest turn radius anywhere on the lane, metres
     const count = xs.length;
+    // The most speed the bend of the lane allows at each sample, at a bank of PLAN_BANK.
+    const cs = new Float64Array(count).fill(99);
     for (let i = 0; i < count; i++) {
       const a = Math.max(i - 3, 0);
       const b = Math.min(i + 3, count - 1);
@@ -228,12 +254,31 @@ export class Lane {
       const radius = run / turn;
       if (radius < this.tightest) this.tightest = radius;
       const can = Math.sqrt(G * Math.tan(PLAN_BANK) * radius);
+      cs[i] = Math.min(can, 99);
       if (can < vs[i]) vs[i] = Math.max(can, SLOWEST);
     }
+    this.cs = cs;
     this.vs = Float64Array.from(vs);
     this.ts = Float64Array.from(ts);
     this.ss = Float64Array.from(ss);
     this.length = length;
+    // How long the lane takes at its own pace, and how much of that is spent far from the
+    // viewer before it first comes within NEAR_RANGE (`lead`) and after it last does (`tail`).
+    // A lane that never comes that close is all lead and all tail.
+    let time = 0;
+    let first = -1;
+    let last = 0;
+    for (let i = 0; i < count; i++) {
+      if (Math.hypot(xs[i] - VIEWER[0], ys[i] - VIEWER[1], zs[i] - VIEWER[2]) < NEAR_RANGE) {
+        if (first < 0) first = time;
+        last = time;
+      }
+      if (i + 1 < count) time += (ss[i + 1] - ss[i]) / ((vs[i] + vs[i + 1]) / 2);
+    }
+    this.time = time;
+    this.visits = first >= 0; // does it come close at all?
+    this.lead = this.visits ? first : time;
+    this.tail = this.visits ? time - last : time;
   }
 
   /**
@@ -284,6 +329,12 @@ export class Lane {
     this.locate(s);
     return lerp(this.ts[this.at], this.ts[this.at + 1], this.frac);
   }
+
+  /** The most speed the lane's bend allows at s, at the bank the lanes are planned for (99: it is straight). */
+  bendSpeedAt(s) {
+    this.locate(s);
+    return Math.min(this.cs[this.at], this.cs[this.at + 1]);
+  }
 }
 
 // A circle of points for the two lanes that go round and round.
@@ -322,6 +373,37 @@ const FROM_RIGHT = [
   [70, -4, -104, 21],
   [52, -8, -130, 21],
 ];
+// The last stretch of the lanes that go round to the right of the ledge: over the far bank of
+// the creek and out over the lake.
+const FROM_FLATS = [
+  [101, 4, -70, 20],
+  [79, -2, -100, 21],
+  [56, -8, -130, 21],
+];
+// The last stretch of the lanes that leave past the left of the ledge: out along the west shore
+// and round to the right over the lake.
+const FROM_LEDGE_LEFT = [
+  [-70, 9, -30, 19],
+  [-94, 4, -54, 20],
+  [-110, -2, -88, 21],
+  [-112, -7, -124, 21],
+  [-104, -11, -158, 21],
+  [-80, -13, -180, 21],
+  [-50, -14.5, -172, 20],
+  [-34, -15, -146, 20],
+];
+// The dive over the viewer's right shoulder, from over the trees behind them down into the
+// valley: the end of the lanes that come round behind.
+const OVER_SHOULDER = [
+  [48, 37, 66, 17],
+  [42, 31.5, 42, 16, 1],
+  [7.5, 14.9, 3, 15, 1],
+  [-7, 2.2, -22, 19, 1],
+  [-14, -13, -56, 24],
+  [-6, -18, -98, 23],
+  [18, -17, -120, 21],
+  [38, -14, -142, 21],
+];
 // The last stretch of the lanes that come back from the west: east over the lake, then a wide
 // turn to the right that ends heading for the viewer.
 const FROM_LEFT = [
@@ -334,9 +416,9 @@ const FROM_LEFT = [
 export const LANES = [
   // Round and round over the near end of the lake, climbing past eye level: the opening.
   new Lane('spiral', 'in', 'out', [
-    ...ring(NODES.in.p[0] + 38, NODES.in.p[2], 38, 180, 720, 45, -15, 10, 15).slice(1),
-    [NODES.in.p[0] + 76, 0, NODES.in.p[2] - 24, 18],
-  ], { weight: 1.3 }),
+    ...ring(NODES.in.p[0] + 42, NODES.in.p[2], 42, 180, 720, 45, -15, 10, 16).slice(1),
+    [NODES.in.p[0] + 79, 0, NODES.in.p[2] - 24, 18],
+  ], { weight: 0.9, near: true }),
 
   // A figure of eight in front of the ledge, a little above eye level: first the loop on the
   // viewer's right, then the one on the left. The whole of it is within 85 m, and at the near
@@ -351,39 +433,40 @@ export const LANES = [
     [40, -4, -122, 21],
   ], { weight: 2.4, near: true }),
 
-  // In from the lake, a turn, and straight across the front of the ledge at eye level.
+  // In from the lake, a turn, and straight across the front of the ledge at eye level; then
+  // round to the left over the flats and the big trees by the creek, and out over the lake.
   new Lane('cross', 'in', 'out', [
     [-33, -12, -92, 20],
     [-40, -7, -66, 18],
-    [-44, -2, -44, 16, 1],
-    [-38, 2, -27, 15, 1],
-    [-22, 4, -17, 15, 1],
-    [0, 4.6, -13.6, 15, 1],
-    [27, 6, -11, 15, 1],
-    [58, 9, 0, 17],
-    [92, 15, 21, 19],
-    [130, 23, 26, 20],
-    [164, 30, 6, 20],
-    [176, 30, -36, 21],
-    ...FROM_RIGHT,
-  ], { weight: 2, near: true }),
+    [-44, -2, -44, 16],
+    [-38, 2, -27, 15],
+    [-22, 4, -17, 15],
+    [0, 4.6, -13.6, 15],
+    [27, 6, -11, 15],
+    [56, 8.5, -2, 16],
+    [84, 11, 2, 17],
+    [106, 12, -14, 18],
+    [112, 10, -42, 19],
+    ...FROM_FLATS,
+  ], { weight: 2.4, near: true, kin: 'across' }),
 
-  // The same way in, but lower: it passes under the ledge, and the viewer looks down on its back.
+  // The same way in, but lower: it passes under the ledge, and the viewer looks down on its
+  // back. (Not so close under that the rim of the ledge hides it: see the tests.)
   new Lane('under', 'in', 'out', [
     [-34, -13, -92, 20],
-    [-44, -12, -66, 18],
-    [-49, -12, -47, 17, 1],
-    [-43, -12.5, -32, 16, 1],
-    [-27, -13.5, -24, 16, 1],
-    [0, -14, -26, 16, 1],
-    [26, -13, -22, 16, 1],
-    [50, -9, -10, 17],
-    [78, -3, 8, 18],
-    [108, 7, 26, 19],
-    [142, 19, 24, 20],
-    [166, 27, -2, 20],
-    [172, 27, -42, 21],
-    ...FROM_RIGHT,
+    [-43, -12, -72, 18],
+    [-48.5, -12, -56, 17],
+    [-47, -12, -44.5, 16],
+    [-41.4, -12, -36.6, 16],
+    [-33, -12.2, -31, 16],
+    [-23, -12.4, -29, 16],
+    [-2, -12.5, -29.5, 16],
+    [26, -12.5, -24.5, 16],
+    [50, -10, -12, 17],
+    [76, -5, -3, 17],
+    [100, 2, -11, 18],
+    [110, 5, -38, 19],
+    ...FROM_FLATS,
   ], { weight: 1.6, near: true }),
 
   // Round behind the viewer over the plateau, then down over their right shoulder into the valley.
@@ -396,64 +479,59 @@ export const LANES = [
     [-48, 41, 92, 18],
     [-8, 42, 102, 17],
     [30, 41, 92, 17],
-    [48, 37, 66, 17],
-    [42, 31.5, 42, 16, 1],
-    [7.5, 14.9, 3, 15, 1],
-    [-7, 2.2, -22, 19, 1],
-    [-14, -13, -56, 24],
-    [-6, -18, -98, 23],
-    [18, -17, -120, 21],
-    [38, -14, -142, 21],
-  ], { weight: 1.6, near: true }),
+    ...OVER_SHOULDER,
+  ], { weight: 1.5, near: true, kin: 'dive' }),
 
-  // Down to the valley floor on the left, along the grassy gap between the trees, and back.
-  new Lane('meadow', 'in', 'in', [
+  // Down to the valley floor on the left and away along the grassy gap between the trees; a
+  // climbing turn at its end, back along the foot of the bluff, and across the front of the ledge.
+  new Lane('meadow', 'in', 'out', [
     [-30, -21, -100, 19],
     [-33, -28, -84, 18],
     [-44, -32.5, -70, 17, 1],
     [-62, -33.5, -60, 16, 1],
     [-84, -33.5, -55, 16, 1],
     [-130, -33.5, -58, 16, 1],
-    [-180, -33.5, -44.5, 16, 1],
-    [-230, -33, -38, 16, 1],
-    [-262, -28, -36, 16, 1],
-    [-292, -16, -38, 17, 1],
-    [-322, 4, -56, 18],
-    [-338, 11, -92, 19],
-    [-326, 17, -128, 20],
-    [-292, 19, -146, 21],
-    [-244, 19, -134, 21],
-    [-200, 17, -120, 21],
-    [-160, 10, -128, 21],
-    ...FROM_LEFT,
-  ], { weight: 1.2 }),
+    [-176, -32, -45.5, 16, 1],
+    [-210, -19, -36, 16, 1],
+    [-234, -6, -16, 17],
+    [-232, 3, 14, 17],
+    [-208, 8, 40, 17],
+    [-170, 11, 48, 18],
+    [-130, 12, 34, 18],
+    [-96, 10, 12, 18],
+    [-70, 8, -4, 17],
+    [-46, 6, -13, 16],
+    [-24, 4.6, -16.5, 15],
+    [0, 4.6, -13.6, 15],
+    [27, 6, -11, 15],
+    [56, 8.5, -2, 16],
+    [84, 11, 2, 17],
+    [106, 12, -14, 18],
+    [112, 10, -42, 19],
+    ...FROM_FLATS,
+  ], { weight: 0.8, near: true, kin: 'across' }),
 
-  // Down at the near end of the lake and out through the gorge on the right, under the treetops.
+  // Low up the creek under the big trees and out through the gorge on the right; up out of it
+  // behind the bluff, round over the trees at the viewer's back, and down over their right shoulder.
   new Lane('gorge', 'in', 'out', [
     [-31, -21, -100, 19],
     [-30, -28, -84, 18],
     [-20, -32, -72, 17, 1],
     [-2, -33, -66.5, 17, 1],
-    [16, -33, -67, 17, 1],
-    [36, -33, -70, 17, 1],
-    [60, -33, -69.5, 17, 1],
-    [98, -33, -49, 17, 1],
-    [124.5, -33, -9, 17, 1],
-    [139, -33, 38, 17, 1],
-    [168.5, -32, 88.5, 17, 1],
-    [227, -28, 128, 17, 1],
-    [284, -10, 146, 17],
-    [318, 12, 122, 18],
-    [318, 31, 76, 19],
-    [290, 45, 32, 20],
-    [254, 51, -6, 20],
-    [222, 47, -50, 21],
-    [192, 33, -88, 21],
-    [150, 15, -100, 21],
-    [104, 2, -100, 21],
-    [70, -5, -110, 21],
-    [52, -9, -134, 21],
-  ], { weight: 1.4 }),
+    [16, -34.5, -67, 17, 1],
+    [36, -35.2, -70, 17, 1],
+    [60, -35, -69.5, 17, 1],
+    [98, -32.5, -49, 17, 1],
+    [124.5, -27, -9, 17, 1],
+    [140, -17, 38, 17, 1],
+    [154, -5, 70, 17],
+    [154, 9, 102, 17],
+    [138, 23.5, 128, 17],
+    [108, 37.5, 143, 17],
+    [78, 42, 134, 17],
+    [56, 41.5, 104, 17],
+    ...OVER_SHOULDER,
+  ], { weight: 0.9, near: true, kin: 'dive' }),
 
   // Most of a circle round the ledge: across the front, over the gorge, over the trees behind.
   new Lane('orbit', 'in', 'out', [
@@ -470,27 +548,55 @@ export const LANES = [
     [-8, 3, -56, 18],
     [16, -4, -92, 20],
     [36, -9, -130, 21],
-  ], { weight: 1.3, near: true }),
+  ], { weight: 2, near: true }),
 
   // From a skim: up the face of the bluff, rising in front of the ledge, and off to the left.
   new Lane('rise', 'low', 'in', [
     [-10, -41.5, -108, 23],
     [-6, -36, -92, 21],
     [-3, -26, -74, 19],
-    [-1.5, -16, -57, 17, 1],
-    [-2, -6, -41, 15, 1],
-    [-8, 3.5, -27, 14, 1],
-    [-22, 9, -18.5, 14, 1],
-    [-44, 11.5, -19, 16, 1],
-    [-70, 9, -30, 19],
-    [-94, 4, -54, 20],
-    [-110, -2, -88, 21],
-    [-112, -7, -124, 21],
-    [-104, -11, -158, 21],
-    [-80, -13, -180, 21],
-    [-50, -14.5, -172, 20],
-    [-34, -15, -146, 20],
+    [-1.5, -16, -57, 17],
+    [-2, -6, -41, 15],
+    [-8, 3.5, -27, 14],
+    [-22, 9, -18.5, 14],
+    [-44, 11.5, -19, 16],
+    ...FROM_LEDGE_LEFT,
   ], { weight: 1, near: true }),
+
+  // Through the big trees at the mouth of the creek, at the height of their crowns: the one
+  // place where the dragons are seen to fly THROUGH the forest, behind one crown and out from
+  // behind the next. Then a climbing turn over the flats on the right, and back across the front
+  // of the ledge from right to left.
+  new Lane('narrows', 'in', 'in', [
+    [-27, -17.5, -99, 19],
+    [-17, -20, -83, 18],
+    [-1, -21.5, -73, 17, 1],
+    [18, -21.5, -70, 16, 1],
+    [38, -21.5, -70, 16, 1],
+    [58, -21, -69, 16, 1],
+    [77, -19.5, -59.5, 16, 1],
+    [94, -16, -47, 16, 1],
+    [110, -10, -30, 16],
+    [114, -3, -9, 16],
+    [102, 3, 9, 16],
+    [80, 7, 14, 16],
+    [56, 8, 6, 16],
+    [30, 6.5, -8, 15],
+    [3, 5.2, -13.6, 15],
+    [-20, 5.5, -17, 15],
+    [-44, 8, -22, 16],
+    ...FROM_LEDGE_LEFT,
+  ], { weight: 2.2, near: true }),
+
+  // Out over the lake and straight back: a tight turn, the usual way round.
+  new Lane('turn', 'out', 'in', [
+    [44, -11.5, -186, 19],
+    [30, -12.5, -204, 17],
+    [8, -13.5, -209, 17],
+    [-14, -14.2, -196, 17],
+    [-25, -14.8, -172, 18],
+    [-29, -15, -145, 20],
+  ], { weight: 3 }),
 
   // Out over the lake and a wide turn back.
   new Lane('far turn', 'out', 'in', [
@@ -501,7 +607,7 @@ export const LANES = [
     [-58, -8, -244, 21],
     [-62, -12, -205, 21],
     [-46, -15, -164, 21],
-  ], { weight: 2 }),
+  ], { weight: 1.2 }),
 
   // Over the wooded hill on the left of the lake, close above its trees.
   new Lane('left hill', 'out', 'in', [
@@ -515,7 +621,7 @@ export const LANES = [
     [-178, 28, -138, 21],
     [-150, 12, -140, 21],
     ...FROM_LEFT,
-  ], { weight: 0.9 }),
+  ], { weight: 0.5, away: true }),
 
   // The same on the right, and back to where it started.
   new Lane('right hill', 'out', 'out', [
@@ -528,7 +634,7 @@ export const LANES = [
     [108, 6, -100, 21],
     [72, -3, -100, 21],
     [54, -8, -128, 21],
-  ], { weight: 0.8 }),
+  ], { weight: 0.3, away: true }),
 
   // The far turn again, but dropping to the water: the start of a skim toward the viewer.
   new Lane('skim', 'out', 'low', [
@@ -544,12 +650,37 @@ export const LANES = [
 
 const laneByName = (name) => LANES.find((l) => l.name === name);
 
+/** The lanes that leave each node. */
+const LANES_FROM = {};
+for (const l of LANES) (LANES_FROM[l.from] || (LANES_FROM[l.from] = [])).push(l);
+
+/**
+ * From each node, the least time that has to pass far from the viewer before a dragon can be
+ * close again (seconds): straight into a lane that comes close, or round by one that does not.
+ */
+const WAY_BACK = {};
+for (const k of Object.keys(NODES)) WAY_BACK[k] = Infinity;
+for (let n = 0; n < 4; n++) for (const l of LANES) WAY_BACK[l.from] = Math.min(WAY_BACK[l.from], l.visits ? l.lead : l.time + WAY_BACK[l.to]);
+
+/**
+ * Pacing. Half a minute of two specks over the far end of the lake is a long time in a headset,
+ * so the lanes are not strung together blindly:
+ *   - no stretch longer than LULL_MAX seconds (at the lanes' own pace) is planned with both
+ *     dragons further off than NEAR_RANGE, while there is another lane to choose;
+ *   - a lane that goes a long way off (`away`) may stretch that to LULL_AWAY, but there are
+ *     never two of them within three lanes, and none in the first minutes;
+ *   - no lane that comes close is flown again within three lanes, nor one that ends the same way.
+ */
+const LULL_MAX = 44;
+const LULL_AWAY = 56;
+const AWAY_AFTER = 210;
+
 /**
  * How the piece begins: the two are coming back from the far end of the lake as it opens; they
- * fly the figure of eight in front of the ledge, go round the lake, and come straight across
- * the front. After that the lanes are chosen by chance.
+ * fly the figure of eight in front of the ledge, turn over the lake, come through the big trees
+ * by the creek and back across the front. After that the lanes are chosen by chance.
  */
-const OPENING = ['far turn', 'eight', 'far turn', 'cross'];
+const OPENING = ['far turn', 'eight', 'turn', 'narrows'];
 /** How far along the first lane the pair starts (metres). */
 const OPENING_START = 150;
 
@@ -557,6 +688,9 @@ const OPENING_START = 150;
 // The flyer
 // ---------------------------------------------------------------------------------------------
 
+/** Slower than this (m/s) a dragon cannot glide: it beats its wings to stay up, this hard at most. */
+const LIFT_BELOW = 17.6;
+const LIFT_BEAT = 0.62;
 const BANK_MAX = 58 * DEG;
 const ROLL_MAX = 80 * DEG; // per second
 const CLIMB_MAX = 38 * DEG;
@@ -583,7 +717,9 @@ export class Flyer {
     // What the rig needs.
     this.pitch = 0;
     this.flap = 0;
-    this.power = 0;
+    this.power = 0; // how hard the wings are beating, as seen and heard: the greater of thrust and lift
+    this.thrust = 0; // how hard it is pushing itself forward
+    this.lift = 0; // how hard it has to beat just to stay up, flying slowly
     this.tuck = 0;
     this.brake = 0;
     this.turn = 0;
@@ -593,6 +729,8 @@ export class Flyer {
     this.jaw = 0;
     this.flapping = true;
     this.roar = 0; // seconds of roar left
+    this.roarYaw = 0; // where the head points while it roars (radians off its line; positive: its left)
+    this.cry = 0; // seconds left of a short call (the jaw opens; no fire)
     this.beats = 0; // counts wingbeats
     this.beatNow = 0; // strength of a downstroke that started this step (0 = none)
     this.floorHits = 0; // steps spent well under the flight floor (should stay 0)
@@ -670,14 +808,21 @@ export class Flyer {
       if ((this.speed > wantSpeed + 1.1 && this.gamma < 0.07) || this.gamma < -0.2) this.flapping = false;
     } else if ((this.speed < wantSpeed - 1.1 && this.gamma > -0.16) || this.gamma > 0.11) {
       this.flapping = true;
-      this.flap = 5.3; // start with the wings coming up to the top
+      if (this.power < 0.2) this.flap = 5.3; // start with the wings coming up to the top
     }
-    const powerWant = this.flapping ? clamp(0.55 + 1.7 * sinG + 0.06 * (wantSpeed - this.speed), 0.45, 1) : 0;
-    this.power += (powerWant - this.power) * (1 - Math.exp(-dt / 0.3));
+    const soften = 1 - Math.exp(-dt / 0.3);
+    const thrustWant = this.flapping ? clamp(0.55 + 1.7 * sinG + 0.06 * (wantSpeed - this.speed), 0.45, 1) : 0;
+    this.thrust += (thrustWant - this.thrust) * soften;
+    // A glide needs speed. Flying slowly (as it does wherever it is close to the ledge, to be
+    // seen) an animal this size has to keep beating to stay up, whether or not it wants to go
+    // faster: those beats hold it up and do not push it on. Not in a dive.
+    const liftWant = this.gamma > -0.2 ? LIFT_BEAT * clamp((LIFT_BELOW - this.speed) / 2.2, 0, 1) : 0;
+    this.lift += (liftWant - this.lift) * soften;
+    this.power = Math.max(this.thrust, this.lift);
     // Too fast for what is coming: wings up and cupped, like a goose landing.
     const brakeWant = this.speed > wantSpeed + 2 ? clamp((this.speed - wantSpeed - 2) / 3, 0, 1) : 0;
-    this.brake += (brakeWant - this.brake) * (1 - Math.exp(-dt / 0.3));
-    let accel = 2.7 * this.power - 0.0021 * this.speed * this.speed - 3.4 * this.brake - G * sinG * 0.55;
+    this.brake += (brakeWant - this.brake) * soften;
+    let accel = 2.7 * this.thrust - 0.0021 * this.speed * this.speed - 3.4 * this.brake - G * sinG * 0.55;
     if (this.speed < 12) accel += (12 - this.speed) * 2;
     this.speed = clamp(this.speed + accel * dt, 9, 38);
 
@@ -730,18 +875,21 @@ export class Flyer {
         pitchWant = clamp(Math.atan2(ly, Math.hypot(lx, lz)) - this.pitch, -40 * DEG, 45 * DEG);
       }
     }
-    // A roar (and the fire that comes with it) goes straight out ahead, head up, whoever is watching.
+    // A roar (and the fire that comes with it) goes out ahead, head up and turned a little to
+    // the side the director chose, whoever it was looking at.
     if (this.roar > 0) {
-      yawWant = 0;
+      yawWant = this.roarYaw;
       pitchWant = 0.12;
     }
     const turnHead = 1 - Math.exp(-dt / 0.3);
     this.lookYaw += (yawWant - this.lookYaw) * turnHead;
     this.lookPitch += (pitchWant - this.lookPitch) * turnHead;
 
-    // The jaw opens for a roar.
+    // The jaw opens for a roar, and for a short call.
     if (this.roar > 0) this.roar = Math.max(0, this.roar - dt);
-    const jawWant = this.roar > 0 ? Math.min(1, this.roar * 2.2) * Math.min(1, (ROAR_SECONDS - this.roar) * 6) : 0;
+    if (this.cry > 0) this.cry = Math.max(0, this.cry - dt);
+    let jawWant = this.roar > 0 ? Math.min(1, this.roar * 2.2) * Math.min(1, (ROAR_SECONDS - this.roar) * 6) : 0;
+    if (this.cry > 0) jawWant = Math.max(jawWant, 0.75 * Math.min(1, this.cry * 5) * Math.min(1, (CRY_SECONDS - this.cry) * 9));
     this.jaw += (jawWant - this.jaw) * (1 - Math.exp(-dt / 0.08));
   }
 
@@ -754,23 +902,53 @@ export class Flyer {
 }
 
 export const ROAR_SECONDS = 1.9;
+/** A short call (the answer to being called) lasts this long (seconds). */
+export const CRY_SECONDS = 0.6;
+/** How far a dragon can turn its head to one side while it roars. */
+const ROAR_YAW = 36 * DEG;
+/**
+ * A called dragon needs CALL_ROOM metres of its line to turn onto it and come down it. The one
+ * of the two that is best placed is the one called: out in front of the ledge between these two
+ * bearings (radians right of straight ahead), at least that far off, and not high above it.
+ */
+const CALL_ROOM = 72;
+const CALL_FROM = [-40 * DEG, 22 * DEG];
+/** The lines a called dragon comes in along, in turn: where it comes from, in radians right of straight ahead. */
+export const CALL_LINES = [-4 * DEG, -15 * DEG, 5 * DEG, -9 * DEG];
+/** One that has no room to turn onto its line makes for a gate this far out along it first (metres), at this speed (m/s). */
+const CALL_GATE = 125;
+const CALL_SLOW = 17.5;
+/** Going out to the gate from beside or behind the ledge, it flies at least this high (metres): over the pine. */
+const CALL_OVER = 27;
+/**
+ * How far above the height of the pass the line in is, `along` metres before it (negative):
+ * level for the last 20 m, and a slope of one in eight before that.
+ */
+const lineRise = (along) => clamp((-along - 20) * 0.125, 0, 14);
 
 /**
  * Where a called dragon goes by. It comes straight at the ledge along (ux, uz), passes to one
- * side of the viewer with a wing over their head, and may turn a little as it leaves. Which
- * side, how far out, how high and which way out is settled by what stands in the way: every
- * combination is tried, each as low as the flight floor along it allows (the dragon may still
- * be coming down as it arrives, and may climb steeply once it is past), and the one that brings
- * it nearest wins.
+ * side of the viewer, and may turn a little as it leaves. Which side, how far out, how high and
+ * which way out is settled by what stands in the way: every combination is tried, each as low
+ * as the flight floor along it allows (the dragon may still be coming down as it arrives, and
+ * may climb steeply once it is past).
+ *
+ * The one that wins is the one that can be WATCHED best: about 12 m from the viewer's head, and
+ * between 22 and 32 degrees above their eye level at its nearest, so that somebody looking at
+ * it as it comes still has it in view as it goes by. (Nearer the zenith it leaves the top of the
+ * picture just as it arrives; lower, its body would be level with the ledge.) From out over the
+ * lake that is 11 m to the viewer's right and 5 m above their head.
+ *
  * Returns { point: [x, y, z] beside the viewer, turn: radians to turn after it (positive: left),
- * near: metres from the viewer's head, side: +1 or -1 }.
+ * near: metres from the viewer's head, side: +1 or -1, elevation: radians above eye level }.
  */
 export function planPass(ux, uz, size, prefer) {
-  const lowest = VIEWER[1] + 8 + 1.6 * size;
-  const best = { point: [0, 0, 0], turn: 0, near: Infinity, side: 0 };
+  const lowest = VIEWER[1] + PASS_OVER + 0.6 * size;
+  const best = { point: [0, 0, 0], turn: 0, near: Infinity, side: 0, elevation: 0 };
+  let least = Infinity;
   for (let k = -1; k <= 1; k += 2) {
     for (let i = 0; i < PASS_SIDES.length; i++) {
-      const off = PASS_SIDES[i] + 1.2 * size;
+      const off = PASS_SIDES[i];
       const px = VIEWER[0] + uz * off * k;
       const pz = VIEWER[2] - ux * off * k;
       // Coming in: it can be dropping at about 17 degrees.
@@ -790,13 +968,20 @@ export function planPass(ux, uz, size, prefer) {
           const need = flightFloor(px + ex * s, pz + ez * s) + 1 - Math.max(s - 6, 0) * 0.5;
           if (need > y) y = need;
         }
+        const near = Math.hypot(off, y - VIEWER[1]);
+        // Never planned nearer than the keep-out and the slack a dragon needs to hold a line.
+        if (near < KEEP_OUT + 1.6) continue;
+        const elevation = Math.atan2(y - VIEWER[1], off);
+        const outside = Math.max(PASS_LOW - elevation, 0, elevation - PASS_HIGH) / DEG;
         // Straight on is preferred to a turn that gains next to nothing, and the side already
         // chosen (`prefer`, when the plan is being brought up to date) to one barely better.
-        const near = Math.hypot(off, y - VIEWER[1]) + Math.abs(turn) * 0.8 - (k === prefer ? 1.5 : 0);
-        if (near < best.near) {
+        const cost = Math.abs(near - PASS_NEAR) + 0.6 * outside + Math.abs(turn) * 0.8 - (k === prefer ? 1.5 : 0);
+        if (cost < least) {
+          least = cost;
           best.near = near;
           best.side = k;
           best.turn = turn;
+          best.elevation = elevation;
           best.point[0] = px;
           best.point[1] = y;
           best.point[2] = pz;
@@ -804,10 +989,15 @@ export function planPass(ux, uz, size, prefer) {
       }
     }
   }
-  best.near = Math.hypot(best.point[0] - VIEWER[0], best.point[1] - VIEWER[1], best.point[2] - VIEWER[2]);
   return best;
 }
-const PASS_SIDES = [4.5, 6, 8, 10.5];
+/** A called dragon's body is planned to pass this far from the viewer's head (metres), and no lower over it than PASS_OVER. */
+const PASS_NEAR = 12;
+const PASS_OVER = 4;
+/** ... and this far above their eye level, seen from where they stand. */
+const PASS_LOW = 22 * DEG;
+const PASS_HIGH = 32 * DEG;
+const PASS_SIDES = [8, 9.5, 11, 12, 13, 14];
 const PASS_TURNS = [0, 20 * DEG, -20 * DEG, 40 * DEG, -40 * DEG];
 
 // ---------------------------------------------------------------------------------------------
@@ -816,6 +1006,13 @@ const PASS_TURNS = [0, 20 * DEG, -20 * DEG, 40 * DEG, -40 * DEG];
 
 /** How far ahead of each dragon its carrot runs (metres). */
 const CARROT = 25;
+/**
+ * A dragon catching up may take a bend this much faster than the lane is planned for (which
+ * takes a bank of 50 degrees where the lane asks for 40).
+ */
+const CATCH_UP_BEND = Math.sqrt(Math.tan(50 * DEG) / Math.tan(PLAN_BANK));
+/** How far ahead of the pair a tight place is seen coming (metres). */
+const TIGHT_AHEAD = 60;
 /** How far each stands off from the lane when the two are side by side (metres). */
 const STAND_OFF = 8;
 /** Nearer to each other than this, the two give way (metres between their bodies). */
@@ -823,14 +1020,29 @@ const GIVE_WAY = 12.5;
 const TMP = [0, 0, 0];
 const TMP2 = [0, 0, 0];
 
+/**
+ * The figures the pair flies. `weight` is how often each is chosen; `close` and `far` scale that
+ * for where the pair is going to be while it lasts: the figures that are worth watching (side by
+ * side, one over the other, round each other) are kept for when they are close enough to be read,
+ * and far off over the lake the two mostly follow one another.
+ */
 const MODES = [
-  { name: 'trail', weight: 3, min: 8, max: 15 },
-  { name: 'weave', weight: 3, min: 8, max: 13 },
-  { name: 'wing', weight: 2.2, min: 7, max: 12 },
-  { name: 'stack', weight: 1.4, min: 6, max: 10 },
-  { name: 'helix', weight: 1.6, min: 10, max: 10.5 },
-  { name: 'swap', weight: 1.6, min: 11, max: 13 },
+  { name: 'trail', weight: 3, min: 8, max: 15, close: 0.3, far: 1.6 },
+  { name: 'weave', weight: 3, min: 8, max: 13, close: 0.7, far: 1 },
+  { name: 'wing', weight: 2.2, min: 7, max: 12, close: 2.2, far: 0.6 },
+  { name: 'stack', weight: 1.4, min: 6, max: 10, close: 3, far: 0.6 },
+  { name: 'helix', weight: 1.6, min: 10, max: 10.5, close: 2, far: 0.6 },
+  { name: 'swap', weight: 1.6, min: 11, max: 13, close: 1, far: 1 },
 ];
+/** Within this of the viewer (metres) the pair is close enough for its figures to be read; beyond FIGURES_FAR it is not. */
+const FIGURES_CLOSE = 120;
+const FIGURES_FAR = 135;
+/**
+ * Nearer to the viewer than SHY_FAR a figure may not bring a dragon closer in than the lane
+ * runs; nearer than SHY_NEAR whatever it asks for on the viewer's side is flown on the other.
+ */
+const SHY_NEAR = 30;
+const SHY_FAR = 52;
 
 export class Director {
   /**
@@ -854,6 +1066,9 @@ export class Director {
     this.end = 0;
     this.node = 'in';
     this.last = '';
+    this.recent = []; // the last few lanes chosen, newest last
+    this.lull = 0; // seconds planned far from the viewer at the end of the path so far
+    this.planned = 0; // seconds of flight laid out so far
     this.opening = OPENING.slice();
     this.center = OPENING_START; // how far along the path the middle of the pair is
     this.lead = 1; // +1: the first dragon is in front
@@ -863,12 +1078,16 @@ export class Director {
     this.axis = Math.PI / 2; // the direction they stand off along (see step)
     this.mode = { name: 'trail', t: 0, length: 8, side: 1 };
     this.jobs = [null, null]; // a fly-past in progress, per dragon
+    this.calls = 0; // how many have been answered
     this.callAt = -100;
+    this.busyAt = -100;
     this.nextRoar = 9 + rng() * 6;
     this.events = [];
     this.spare = [];
     this.wants = [0, 0, 0, 0, 0, null];
     this.carrots = [[0, 0, 0], [0, 0, 0]];
+    this.near = [0, 0]; // how far each is from the viewer
+    this.under = [0, 0];
     this.wantSpeed = [20, 20];
     this.along = [this.center + this.gap * 0.5, this.center - this.gap * 0.5]; // each one's place on the path
     this.on = [true, true]; // is it following the lane (or away on a call)?
@@ -891,31 +1110,85 @@ export class Director {
   /** Add lanes until the path reaches well past the pair. */
   extend() {
     while (this.end < this.center + 420) {
-      let lane;
-      if (this.opening.length) {
-        lane = laneByName(this.opening.shift());
-      } else {
-        const choices = LANES.filter((l) => l.from === this.node && l.name !== this.last);
-        let total = 0;
-        for (const l of choices) total += l.weight;
-        let pick = this.rng() * total;
-        lane = choices[choices.length - 1];
-        for (const l of choices) {
-          pick -= l.weight;
-          if (pick <= 0) {
-            lane = l;
-            break;
-          }
-        }
-      }
+      const lane = this.opening.length ? laneByName(this.opening.shift()) : this.choose();
       this.path.push({ lane, start: this.end });
       this.end += lane.length;
       this.node = lane.to;
       this.last = lane.name;
+      this.recent.push(lane);
+      if (this.recent.length > 4) this.recent.shift();
+      this.lull = lane.visits ? lane.tail : this.lull + lane.time;
+      this.planned += lane.time;
     }
     // Forget lanes both dragons have left behind.
     while (this.path.length > 1 && this.path[1].start < this.center - 320) this.path.shift();
     this.base = this.path[0].start;
+  }
+
+  /**
+   * How long both dragons would be far from the viewer if this lane came next: what is planned
+   * already, and this lane's way in (or all of it, and the way back from where it ends).
+   */
+  lullWith(lane, lull) {
+    return lull + (lane.visits ? lane.lead : lane.time + WAY_BACK[lane.to]);
+  }
+
+  /**
+   * May this lane come next? `strict` 2: every rule of the pacing; 1: only the rules about going
+   * far away; 0: anything but the lane just flown. `recent`: the lanes before it, newest last.
+   */
+  suits(lane, strict, recent, lull) {
+    const n = recent.length;
+    if (n && recent[n - 1] === lane) return false;
+    if (strict >= 1 && lane.away) {
+      if (this.planned < AWAY_AFTER) return false;
+      for (let i = Math.max(n - 2, 0); i < n; i++) if (recent[i].away) return false;
+    }
+    if (strict >= 2) {
+      for (let i = Math.max(n - 3, 0); i < n; i++) {
+        if (lane.near && recent[i] === lane) return false;
+        if (lane.kin && recent[i].kin === lane.kin) return false;
+      }
+      if (this.lullWith(lane, lull) > (lane.away ? LULL_AWAY : LULL_MAX)) return false;
+    }
+    // A lane that ends where only one lane leaves commits the pair to that one as well.
+    const on = LANES_FROM[lane.to];
+    if (on.length === 1 && on[0] !== lane) return this.suits(on[0], strict, recent.concat(lane), lane.visits ? lane.tail : lull + lane.time);
+    return true;
+  }
+
+  /** Choose the next lane from where the path ends: by chance, among those the pacing allows. */
+  choose() {
+    const from = LANES_FROM[this.node];
+    const roll = this.rng();
+    for (let strict = 2; strict >= 0; strict--) {
+      let total = 0;
+      let quickest = Infinity;
+      for (const l of from) {
+        if (!this.suits(l, strict, this.recent, this.lull)) continue;
+        total += l.weight;
+        quickest = Math.min(quickest, this.lullWith(l, this.lull));
+      }
+      if (!(total > 0)) continue;
+      // Nothing keeps to the time allowed (the last lane went a long way off): then the quick
+      // ways back are the only ones considered.
+      const hurry = strict < 2 && quickest > LULL_MAX;
+      if (hurry) {
+        total = 0;
+        for (const l of from) if (this.suits(l, strict, this.recent, this.lull) && this.lullWith(l, this.lull) <= quickest + 4) total += l.weight;
+      }
+      let pick = roll * total;
+      let lane = null;
+      for (const l of from) {
+        if (!this.suits(l, strict, this.recent, this.lull)) continue;
+        if (hurry && this.lullWith(l, this.lull) > quickest + 4) continue;
+        lane = l;
+        pick -= l.weight;
+        if (pick <= 0) break;
+      }
+      return lane;
+    }
+    return from[0];
   }
 
   /** The lane a distance along the path falls in. */
@@ -940,6 +1213,17 @@ export class Director {
     return e.lane.tightAt(s - e.start);
   }
 
+  bendSpeedAt(s) {
+    const e = this.find(s);
+    return e.lane.bendSpeedAt(s - e.start);
+  }
+
+  /** How far the path is from the viewer's head at s (metres). */
+  rangeAt(s) {
+    const p = this.pointAt(s, TMP);
+    return Math.hypot(p[0] - VIEWER[0], p[1] - VIEWER[1], p[2] - VIEWER[2]);
+  }
+
   /** The names of the lanes being flown and coming up. */
   program() {
     return this.path.filter((e) => e.start + e.lane.length > this.center).map((e) => e.lane.name);
@@ -950,17 +1234,19 @@ export class Director {
   /**
    * Choose how the pair flies next. calm: a tight place is here or close, single file only.
    * soon: one is coming within a quarter of a minute, so nothing that takes long to undo.
+   * range: how near the viewer the pair comes while the figure lasts (metres).
    */
-  pickMode(calm, soon) {
+  pickMode(calm, soon, range) {
     let name = 'trail';
+    const where = range < FIGURES_CLOSE ? 'close' : range > FIGURES_FAR ? 'far' : '';
     if (!calm) {
       const ok = (m) => m.name !== this.mode.name && !(soon && (m.name === 'swap' || m.name === 'helix'));
       let total = 0;
-      for (const m of MODES) if (ok(m)) total += m.weight;
+      for (const m of MODES) if (ok(m)) total += m.weight * (where ? m[where] : 1);
       let pick = this.rng() * total;
       for (const m of MODES) {
         if (!ok(m)) continue;
-        pick -= m.weight;
+        pick -= m.weight * (where ? m[where] : 1);
         if (pick <= 0) {
           name = m.name;
           break;
@@ -968,7 +1254,7 @@ export class Director {
       }
     }
     const def = MODES.find((m) => m.name === name);
-    this.mode = { name, t: 0, length: lerp(def.min, def.max, this.rng()), side: this.rng() < 0.5 ? -1 : 1 };
+    this.mode = { name, t: 0, length: lerp(def.min, def.max, this.rng()), side: this.rng() < 0.5 ? -1 : 1, where };
     if (name === 'swap') this.lead = -this.lead;
   }
 
@@ -1017,27 +1303,58 @@ export class Director {
   // --- Calling a dragon -----------------------------------------------------------------------
 
   /**
-   * Send a dragon past the viewer. Returns its number, or -1 if neither is free (one is already
-   * on its way, or the last call was a moment ago).
+   * Is a dragon where a good pass can be flown from: out over the valley in front of the ledge,
+   * far enough off to line up, and not high above it? (From anywhere else the trees round the
+   * back of the ledge force it over the top of the viewer's head, out of their sight.)
+   */
+  placed(f) {
+    const dx = f.x - VIEWER[0];
+    const dz = f.z - VIEWER[2];
+    const far = Math.hypot(dx, dz);
+    const az = Math.atan2(dx, -dz); // to the right of straight ahead: positive
+    return far >= CALL_ROOM && az > CALL_FROM[0] && az < CALL_FROM[1] && f.y < VIEWER[1] + 5 + 0.25 * (far - 30);
+  }
+
+  /**
+   * Send a dragon past the viewer. Returns its number, or -1 if neither is free (both are
+   * already on their way, or the last call was a moment ago). Either way something is heard:
+   * the one that comes calls back at once ('call' in the events), and if none can, the one
+   * that is already coming says so ('busy').
    */
   call() {
-    if (this.time - this.callAt < 4) return -1;
-    const free = [0, 1].filter((i) => !this.jobs[i]);
-    if (!free.length) return -1;
+    const free = [];
+    for (let i = 0; i < 2; i++) if (!this.jobs[i]) free.push(i);
     const dist = (i) => Math.hypot(this.flyers[i].x - VIEWER[0], this.flyers[i].y - VIEWER[1], this.flyers[i].z - VIEWER[2]);
-    // The nearer one that still has room to turn toward the viewer.
-    free.sort((a, b) => dist(a) - dist(b));
+    if (this.time - this.callAt < 4 || !free.length) {
+      // The one that is on its way (the nearer, if both are) lets it be known.
+      let busy = -1;
+      for (let i = 0; i < 2; i++) if (this.jobs[i] && (busy < 0 || dist(i) < dist(busy))) busy = i;
+      if (busy >= 0 && this.time - this.busyAt > 1.5) {
+        this.busyAt = this.time;
+        this.flyers[busy].cry = CRY_SECONDS;
+        this.events.push({ type: 'busy', dragon: busy });
+      }
+      return -1;
+    }
+    // The one that is placed to come straight in, if either is; otherwise the nearer.
+    const rank = (i) => (this.placed(this.flyers[i]) ? 0 : 1000) + dist(i);
     let who = free[0];
-    if (dist(who) < 45 && free.length > 1) who = free[1];
+    if (free.length > 1 && rank(free[1]) < rank(who)) who = free[1];
     const f = this.flyers[who];
-    const dx = VIEWER[0] - f.x;
-    const dz = VIEWER[2] - f.z;
-    const d = Math.hypot(dx, dz) || 1;
-    const ux = dx / d;
-    const uz = dz / d;
+    // It comes in over the near end of the lake, on one of a few lines a little apart (so that
+    // no two calls in a row are answered alike), and goes by where planPass finds is best
+    // for that line: to the viewer's right, a little above their head.
+    const from = CALL_LINES[this.calls++ % CALL_LINES.length];
+    const ux = -Math.sin(from);
+    const uz = Math.cos(from);
     const plan = planPass(ux, uz, f.size);
-    this.jobs[who] = { phase: 'come', pass: plan.point, turn: plan.turn, side: plan.side, dir: [ux, uz], exit: [ux, uz], t: 0, replan: 0.4, roared: false };
+    const job = { phase: 'out', pass: plan.point, turn: plan.turn, side: plan.side, line: [ux, uz], dir: [ux, uz], exit: [ux, uz], t: 0, roared: false };
+    // Already far enough out over the valley: then it simply comes.
+    if (this.canCome(f, job)) job.phase = 'come';
+    this.jobs[who] = job;
     this.callAt = this.time;
+    // It answers at once: a short call, and it looks round at the viewer.
+    f.cry = CRY_SECONDS;
     this.events.push({ type: 'call', dragon: who });
     return who;
   }
@@ -1058,7 +1375,7 @@ export class Director {
       const f = flyers[i];
       const should = this.center + (i === 0 ? 0.5 : -0.5) * this.gap;
       if (this.on[i]) {
-        this.along[i] = this.project(f, this.along[i] - 4, this.along[i] + 45);
+        this.along[i] = this.project(f, this.along[i] - 4, this.along[i] + 24);
       } else {
         // Back from a call: it joins the lane where it is nearest to it, not too far from its
         // place in the pair.
@@ -1083,16 +1400,23 @@ export class Director {
     this.center += this.speedAt(this.center) * pace * dt;
     this.extend();
 
-    // Tight places ahead: single file, and no fancy figures.
+    // Tight places ahead: single file, and no fancy figures. (They need three seconds' warning
+    // to fall into line, no more: single file is the dullest thing the two can do.)
     let tight = 0;
-    for (let d = -40; d <= 150; d += 15) tight = Math.max(tight, this.tightAt(this.center + d));
+    for (let d = -40; d <= TIGHT_AHEAD; d += 10) tight = Math.max(tight, this.tightAt(this.center + d));
     this.mode.t += dt;
+    // How near the viewer the pair comes in the next eight seconds or so.
+    let range = Infinity;
+    for (let d = 0; d <= 150; d += 30) range = Math.min(range, this.rangeAt(this.center + d));
     if (this.mode.t > this.mode.length) {
       let soon = 0;
-      for (let d = 150; d <= 330; d += 20) soon = Math.max(soon, this.tightAt(this.center + d));
-      this.pickMode(tight > 0.3, soon > 0.3);
+      for (let d = TIGHT_AHEAD; d <= TIGHT_AHEAD + 180; d += 20) soon = Math.max(soon, this.tightAt(this.center + d));
+      this.pickMode(tight > 0.3, soon > 0.3, range);
     } else if (tight > 0.3 && this.mode.name !== 'trail' && this.mode.name !== 'swap') {
-      this.pickMode(true, true);
+      this.pickMode(true, true, range);
+    } else if (tight <= 0.3 && range < FIGURES_CLOSE - 15 && this.mode.name === 'trail' && this.mode.where !== 'close' && this.mode.t > 1.5) {
+      // Coming in close while only following one another: time for something better.
+      this.pickMode(false, false, range);
     }
 
     const want = this.modeWants();
@@ -1121,7 +1445,10 @@ export class Director {
     const ease = 1 - Math.exp(-dt / 0.7);
     const p = TMP;
     const q = TMP2;
-    const near = [0, 0];
+    const near = this.near;
+    const under = this.under;
+    under[0] = 0;
+    under[1] = 0;
     for (let i = 0; i < 2; i++) {
       const f = flyers[i];
       const carrot = this.carrots[i];
@@ -1154,17 +1481,52 @@ export class Director {
       const tz = q[2] - p[2];
       const tl = Math.hypot(tx, tz) || 1;
       // Left of the direction of travel is (tz, -tx).
-      const off = this.offsets[i * 2] + this.standOff[i * 2];
+      let figure = this.offsets[i * 2];
+      let apartSide = this.standOff[i * 2];
+      // In front of the ledge there is rock on one side and open air on the other. Whatever
+      // a figure asks for on the viewer's side is given up there, and the two stand off from
+      // each other wholly on the far side: the one that would have been nearer keeps to the
+      // lane, the other goes twice as far out.
+      const vx = VIEWER[0] - p[0];
+      const vz = VIEWER[2] - p[2];
+      const vd = Math.hypot(vx, vz) || 1;
+      const shy = 1 - smoothstep(SHY_NEAR, SHY_FAR, vd);
+      if (shy > 0) {
+        // +1: the viewer is straight to the left of the lane here; -1: to the right.
+        const side = (vx * tz - vz * tx) / (tl * vd);
+        if (figure * side > 0) figure *= 1 - shy * Math.abs(side);
+        apartSide -= shy * side * Math.abs(apartSide);
+      }
+      const off = figure + apartSide;
       carrot[0] = p[0] + (tz / tl) * off;
       carrot[1] = p[1] + this.offsets[i * 2 + 1] + this.standOff[i * 2 + 1];
       carrot[2] = p[2] - (tx / tl) * off;
+      // (Used below: how far this one has been asked under the flight floor, if at all.)
+      under[i] = here < 0.5 ? flightFloor(carrot[0], carrot[2]) + 2 - carrot[1] : 0;
       // Speed: what the lane allows here (slowing in time for what is coming), faster when it
       // is behind its place and slower when ahead. No hurrying through the tight places.
       const allowed = this.allowedSpeed(at);
       let tightAhead = here;
       for (let d = 25; d <= 75; d += 25) tightAhead = Math.max(tightAhead, this.tightAt(at + d));
       const late = this.on[i] ? should - this.along[i] : 60;
-      this.wantSpeed[i] = allowed * (1 + clamp(0.014 * late, -0.3, 0.45 * (1 - tightAhead)));
+      let hurry = allowed * (1 + clamp(0.014 * late, -0.3, 0.45 * (1 - tightAhead)));
+      // However far behind, no faster than it can still follow the bends just ahead: a dragon
+      // that swings wide of a turn ends up further behind, and somewhere it should not be.
+      if (hurry > allowed) {
+        let bend = 99;
+        for (let d = 0; d <= 48; d += 12) bend = Math.min(bend, this.bendSpeedAt(at + d));
+        hurry = Math.max(Math.min(hurry, bend * CATCH_UP_BEND), allowed);
+      }
+      this.wantSpeed[i] = hurry;
+    }
+
+    // One above the other, the lower one may have been asked under the flight floor (over a
+    // rise, by a tree). Then both fly that much higher: they keep their distance from each
+    // other, and nobody has to pull up.
+    const lift = Math.max(under[0], under[1]);
+    if (lift > 0) {
+      if (!this.jobs[0]) this.carrots[0][1] += lift;
+      if (!this.jobs[1]) this.carrots[1][1] += lift;
     }
 
     // The lane keeps the two apart when each is in its place. When one is not (it is catching
@@ -1176,7 +1538,10 @@ export class Director {
     let sy = flyers[0].y - flyers[1].y;
     let sz = flyers[0].z - flyers[1].z;
     let sep = Math.hypot(sx, sy, sz);
-    if (sep < GIVE_WAY + 30) {
+    // (One that has been called flies its own way, and may meet the other head on: for those
+    // two the look ahead is longer.)
+    const away = this.jobs[0] || this.jobs[1];
+    if (sep < GIVE_WAY + (away ? 75 : 30)) {
       const a = flyers[0];
       const b = flyers[1];
       const ca = Math.cos(a.gamma) * a.speed;
@@ -1187,7 +1552,7 @@ export class Director {
       const x0 = sx;
       const y0 = sy;
       const z0 = sz;
-      for (let k = 1; k <= 3; k++) {
+      for (let k = 1; k <= (away ? 5 : 3); k++) {
         const t = 0.5 * k;
         const px = x0 + vx * t;
         const py = y0 + vy * t;
@@ -1209,19 +1574,23 @@ export class Director {
       const flat = Math.hypot(sx, sz);
       for (let i = 0; i < 2; i++) {
         const sign = i === 0 ? 1 : -1;
-        this.carrots[i][1] += sign * upward * push;
+        // A point that is chased from far off (one that has been called chases such points)
+        // has to move further to turn the dragon as much.
+        const c = this.carrots[i];
+        const reach = Math.max(1, Math.hypot(c[0] - flyers[i].x, c[2] - flyers[i].z) / CARROT);
+        c[1] += sign * upward * push * reach;
         if (flat > 0.5) {
-          this.carrots[i][0] += ((sign * sx) / flat) * push * 0.6;
-          this.carrots[i][2] += ((sign * sz) / flat) * push * 0.6;
+          c[0] += ((sign * sx) / flat) * push * 0.6 * reach;
+          c[2] += ((sign * sz) / flat) * push * 0.6 * reach;
         }
       }
     }
 
     for (let i = 0; i < 2; i++) {
       const f = flyers[i];
-      // Where to look: at the viewer when close, otherwise the chaser watches the leader.
+      // Where to look: at the viewer when close or called, otherwise the chaser watches the leader.
       let look = null;
-      if (near[i] < 75) look = VIEWER;
+      if (near[i] < 75 || this.jobs[i]) look = VIEWER;
       else if ((i === 0 ? 1 : -1) !== this.lead && !this.jobs[i]) look = [flyers[1 - i].x, flyers[1 - i].y, flyers[1 - i].z];
       f.step(dt, this.carrots[i], this.wantSpeed[i], look);
       if (f.beatNow > 0) this.events.push({ type: 'beat', dragon: i, strength: f.beatNow });
@@ -1269,35 +1638,69 @@ export class Director {
     return v;
   }
 
-  /** Carrot and speed for a dragon that has been called. Returns the speed to fly at. */
+  /**
+   * Has a called dragon room to turn onto the line it is to come in along: far enough out
+   * along it, not too far to one side, not too high?
+   */
+  canCome(f, job) {
+    const u = job.line;
+    const rx = f.x - job.pass[0];
+    const rz = f.z - job.pass[2];
+    const along = rx * u[0] + rz * u[1];
+    const aside = Math.abs(rz * u[0] - rx * u[1]);
+    return along < -CALL_ROOM && aside < 55 + 0.5 * (-along - CALL_ROOM) && f.y < job.pass[1] + 14 + 0.3 * -along;
+  }
+
+  /**
+   * Carrot and speed for a dragon that has been called. Returns the speed to fly at.
+   *
+   * 'out'   Called from close by, from one side or from over the trees behind: out over the
+   *         valley first, toward a gate on the line it will come in along, until there is
+   *         room to turn onto that line. (Coming straight from where it was, it could only go
+   *         over the top of the viewer's head and the trees behind them.) Slowly: a slow
+   *         dragon turns in less room, and this is done in full view.
+   * 'come'  Onto the line and down it, on a gentle slope to the height of the pass.
+   * 'go'    Through the point beside the viewer, on past them, and back to the other dragon.
+   */
   flyPast(i, job, dt, toViewer) {
     const f = this.flyers[i];
     const carrot = this.carrots[i];
+    const u = job.line;
     job.t += dt;
-    if (job.phase === 'come') {
-      carrot[0] = job.pass[0];
-      carrot[1] = job.pass[1];
-      carrot[2] = job.pass[2];
-      const d = Math.hypot(job.pass[0] - f.x, job.pass[2] - f.z);
-      // It was called from wherever it happened to be, and has to turn before it can come:
-      // the line it will arrive on is not known at first. The plan is brought up to date as
-      // it comes, until it is close.
-      job.replan -= dt;
-      if (job.replan <= 0 && d > 42) {
-        job.replan = 0.4;
-        const vx = VIEWER[0] - f.x;
-        const vz = VIEWER[2] - f.z;
-        const vl = Math.hypot(vx, vz) || 1;
-        const plan = planPass(vx / vl, vz / vl, f.size, job.side);
-        job.pass = plan.point;
-        job.turn = plan.turn;
-        job.side = plan.side;
+    // Where it is by the line: `along` is 0 at the point beside the viewer and negative
+    // before it; `aside` is how far off the line it is.
+    const rx = f.x - job.pass[0];
+    const rz = f.z - job.pass[2];
+    const along = rx * u[0] + rz * u[1];
+    const aside = Math.abs(rz * u[0] - rx * u[1]);
+    if (job.phase === 'out') {
+      carrot[0] = job.pass[0] - u[0] * CALL_GATE;
+      carrot[2] = job.pass[2] - u[1] * CALL_GATE;
+      carrot[1] = Math.max(job.pass[1] + lineRise(-CALL_GATE), flightFloor(carrot[0], carrot[2]) + 3);
+      // Beside the ledge or behind it there are trees between it and the valley: over them.
+      if (f.z > -12 && toViewer < HERO_REACH + 12) carrot[1] = Math.max(carrot[1], CALL_OVER);
+      if (job.t > 18 || this.canCome(f, job)) {
+        job.phase = 'come';
+        job.t = 0;
       }
-      if (!job.roared && d < 95) {
+      return CALL_SLOW;
+    }
+    if (job.phase === 'come') {
+      // The point it chases runs ahead of it down the line, and stops beside the viewer.
+      const at = Math.min(along + 34, 0);
+      carrot[0] = job.pass[0] + u[0] * at;
+      carrot[2] = job.pass[2] + u[1] * at;
+      // From above it comes down the slope of the line. From below (low over the water) it
+      // does not climb to the slope first: it rises steadily, to be level 40 m before the pass.
+      carrot[1] = job.pass[1] + lineRise(at);
+      if (f.y < job.pass[1] + lineRise(along)) carrot[1] = Math.min(carrot[1], lerp(f.y, job.pass[1], clamp(34 / Math.max(-along - 40, 34), 0, 1)));
+      const d = Math.hypot(rx, rz);
+      const onLine = aside < 14 && Math.abs(wrap(Math.atan2(u[0], u[1]) - f.heading)) < 30 * DEG;
+      if (!job.roared && d < 95 && onLine) {
         job.roared = true;
         this.roar(i, 'call');
       }
-      if (d < 24 || job.t > 40) {
+      if (d < 24 || along > -16 || job.t > 40) {
         // Close: keep the line it is on, straight through the point beside the viewer, and
         // then out the way that was planned.
         job.phase = 'go';
@@ -1305,10 +1708,15 @@ export class Director {
         const h = f.heading;
         job.dir = [Math.sin(h), Math.cos(h)];
         job.exit = [Math.sin(h + job.turn), Math.cos(h + job.turn)];
+        if (!job.roared) this.roar(i, 'call');
+        job.roared = true;
         this.events.push({ type: 'pass', dragon: i });
       }
-      // Fast on the way in, slow enough over the ledge to be seen.
-      return d > 90 ? 27 : lerp(14.5, 27, clamp((d - 30) / 60, 0, 1));
+      // A long way out there is room for anything, and it hurries. Nearer, slowly until it is
+      // on the line; then fast again, and slow enough over the ledge to be seen.
+      if (d > 140) return 29;
+      if (!onLine && d > 45) return CALL_SLOW;
+      return d > 90 ? 26 : lerp(14.5, 26, clamp((d - 30) / 60, 0, 1));
     }
     // 'go': through the point, on past the viewer, then back to the other dragon.
     const gone = (f.x - job.pass[0]) * job.dir[0] + (f.z - job.pass[2]) * job.dir[1];
@@ -1329,7 +1737,20 @@ export class Director {
   }
 
   roar(i, kind) {
-    this.flyers[i].roar = ROAR_SECONDS;
+    const f = this.flyers[i];
+    f.roar = ROAR_SECONDS;
+    // It turns its head as it roars, as far as its neck allows, so that the fire is seen from
+    // the side: a jet breathed straight at the viewer is a small bright tuft and nothing more.
+    const dx = VIEWER[0] - f.x;
+    const dz = VIEWER[2] - f.z;
+    const toViewer = wrap(Math.atan2(dx, dz) - f.heading); // positive: the viewer is to its left
+    let away = toViewer > 0 ? -1 : 1;
+    if (Math.abs(toViewer) < 0.12) {
+      // Coming straight at them: either side would do. The side away from the low sun, as the
+      // viewer sees it, where the fire is not lost in the glare.
+      away = -dx * SUN_DIR[2] + dz * SUN_DIR[0] > 0 ? 1 : -1;
+    }
+    f.roarYaw = clamp(toViewer + away * Math.PI * 0.5, -ROAR_YAW, ROAR_YAW);
     this.events.push({ type: 'roar', dragon: i, kind });
   }
 
