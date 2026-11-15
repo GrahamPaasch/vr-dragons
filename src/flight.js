@@ -278,6 +278,11 @@ function ring(cx, cz, radius, fromDeg, toDeg, stepDeg, y0, y1, speed, tight) {
   return out;
 }
 
+/** Points on a circle at the given angles (degrees, as in ring()), each with its own height. */
+function arc(cx, cz, radius, degs, heights, speed, tight) {
+  return degs.map((deg, i) => [cx + Math.cos(deg * DEG) * radius, heights[i], cz - Math.sin(deg * DEG) * radius, speed, tight || 0]);
+}
+
 /**
  * The lanes. Coordinates are world metres: x to the viewer's right, y up from the ledge, -z
  * ahead; the lake surface is at y = -46. Each row: x, y, z, speed, tight.
@@ -312,6 +317,19 @@ export const LANES = [
     [NODES.in.p[0] + 76, 0, NODES.in.p[2] - 24, 18],
   ], { weight: 1.3 }),
 
+  // A figure of eight in front of the ledge, a little above eye level: first the loop on the
+  // viewer's right, then the one on the left. The whole of it is within 85 m, and at the near
+  // side of each loop the dragons are 25 m away, banked over, showing their backs.
+  new Lane('eight', 'in', 'out', [
+    [-24, -10, -93, 19],
+    [-11, -2, -69, 17],
+    ...arc(29, -46, 29, [180, 225, 270, 315, 360, 405, 450, 495], [4, 5, 6.5, 8, 9, 8.5, 7, 5], 15.5),
+    ...arc(-29, -46, 29, [0, -45, -90, -135, -180, -225, -270], [4, 4.5, 6, 8, 9.5, 11, 11.5], 15.5),
+    [-4, 9, -80, 17],
+    [22, 3, -94, 19],
+    [40, -4, -122, 21],
+  ], { weight: 2.4, near: true }),
+
   // In from the lake, a turn, and straight across the front of the ledge at eye level.
   new Lane('cross', 'in', 'out', [
     [-33, -12, -92, 20],
@@ -333,9 +351,9 @@ export const LANES = [
   new Lane('under', 'in', 'out', [
     [-34, -13, -92, 20],
     [-44, -12, -66, 18],
-    [-50, -12, -46, 17, 1],
-    [-45, -12.5, -31, 16, 1],
-    [-28, -13.5, -23, 16, 1],
+    [-49, -12, -47, 17, 1],
+    [-43, -12.5, -32, 16, 1],
+    [-27, -13.5, -24, 16, 1],
     [0, -14, -26, 16, 1],
     [26, -13, -22, 16, 1],
     [50, -9, -10, 17],
@@ -358,9 +376,9 @@ export const LANES = [
     [-8, 42, 102, 17],
     [30, 41, 92, 17],
     [48, 37, 66, 17],
-    [42, 30, 42, 16, 1],
-    [6, 11.8, 2, 15, 1],
-    [-8, 1, -22, 19, 1],
+    [42, 31.5, 42, 16, 1],
+    [7.5, 13.4, 3, 15, 1],
+    [-7, 2.2, -22, 19, 1],
     [-14, -13, -56, 24],
     [-6, -18, -98, 23],
     [18, -17, -120, 21],
@@ -505,8 +523,14 @@ export const LANES = [
 
 const laneByName = (name) => LANES.find((l) => l.name === name);
 
-/** How the piece begins: circling over the lake, a turn at the far end, then across the front. */
-const OPENING = ['spiral', 'far turn', 'cross'];
+/**
+ * How the piece begins: the two are coming back from the far end of the lake as it opens; they
+ * fly the figure of eight in front of the ledge, go round the lake, and come straight across
+ * the front. After that the lanes are chosen by chance.
+ */
+const OPENING = ['far turn', 'eight', 'far turn', 'cross'];
+/** How far along the first lane the pair starts (metres). */
+const OPENING_START = 150;
 
 // ---------------------------------------------------------------------------------------------
 // The flyer
@@ -750,7 +774,7 @@ export class Director {
     this.node = 'in';
     this.last = '';
     this.opening = OPENING.slice();
-    this.center = 40; // how far along the path the middle of the pair is
+    this.center = OPENING_START; // how far along the path the middle of the pair is
     this.lead = 1; // +1: the first dragon is in front
     this.gap = 26; // signed: positive when the first dragon is ahead
     this.offsets = [0, 0, 0, 0]; // sideways and up for each dragon, smoothed
@@ -1059,13 +1083,42 @@ export class Director {
     // The lane keeps the two apart when each is in its place. When one is not (it is catching
     // up, or coming back from a call), they also give way to each other directly: the higher
     // one goes up, the lower one down, and each a little off to its own side.
-    const sx = flyers[0].x - flyers[1].x;
-    const sy = flyers[0].y - flyers[1].y;
-    const sz = flyers[0].z - flyers[1].z;
-    const sep = Math.hypot(sx, sy, sz);
+    // They look a second and a half ahead: two that are closing fast start to give way before
+    // they are close.
+    let sx = flyers[0].x - flyers[1].x;
+    let sy = flyers[0].y - flyers[1].y;
+    let sz = flyers[0].z - flyers[1].z;
+    let sep = Math.hypot(sx, sy, sz);
+    if (sep < GIVE_WAY + 30) {
+      const a = flyers[0];
+      const b = flyers[1];
+      const ca = Math.cos(a.gamma) * a.speed;
+      const cb = Math.cos(b.gamma) * b.speed;
+      const vx = ca * Math.sin(a.heading) - cb * Math.sin(b.heading);
+      const vy = Math.sin(a.gamma) * a.speed - Math.sin(b.gamma) * b.speed;
+      const vz = ca * Math.cos(a.heading) - cb * Math.cos(b.heading);
+      const x0 = sx;
+      const y0 = sy;
+      const z0 = sz;
+      for (let k = 1; k <= 3; k++) {
+        const t = 0.5 * k;
+        const px = x0 + vx * t;
+        const py = y0 + vy * t;
+        const pz = z0 + vz * t;
+        // What is further off in time counts as a little further off in space.
+        const d = Math.hypot(px, py, pz) + 1.5 * t;
+        if (d < sep) {
+          sep = d;
+          sx = px;
+          sy = py;
+          sz = pz;
+        }
+      }
+    }
     if (sep < GIVE_WAY) {
       const push = (GIVE_WAY - sep) * 2.4;
-      const upward = sy >= 0 ? 1 : -1;
+      // The one that is higher now stays the higher one.
+      const upward = flyers[0].y >= flyers[1].y ? 1 : -1;
       const flat = Math.hypot(sx, sz);
       for (let i = 0; i < 2; i++) {
         const sign = i === 0 ? 1 : -1;
