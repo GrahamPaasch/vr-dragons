@@ -99,6 +99,9 @@ test('the governor leaves a picture that keeps up alone', () => {
   // A single long hitch (a shader compiling, the system menu) is not a reason either.
   for (let i = 0; i < 400; i++) g.frame(i === 200 ? 0.4 : 1 / 72, 1 / 72);
   assert.equal(g.level, 0);
+  // Nor is a page left in the background, where frames come once a second or are capped at a tenth.
+  for (let i = 0; i < 2000; i++) g.frame(i % 2 ? 1 : 0.1, 1 / 72);
+  assert.equal(g.level, 0, 'pauses are not slow frames');
 });
 
 test('when frames keep coming late it thins the picture one step at a time, and never puts it back', () => {

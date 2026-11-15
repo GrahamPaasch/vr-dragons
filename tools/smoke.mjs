@@ -524,6 +524,8 @@ async function quest1(browser, base) {
       const d = window.__dragons;
       return {
         last: d.state.vr.last,
+        said: document.getElementById('hint').textContent,
+        saidShown: !document.getElementById('hint').hidden,
         hud: !document.getElementById('hud').hidden,
         hint: !!d.stage.hint,
         camera: [d.stage.camera.position.x, d.stage.camera.position.y, d.stage.camera.position.z],
@@ -533,6 +535,8 @@ async function quest1(browser, base) {
     });
     console.log('        ' + s.last + ' (software drawing: says nothing about a headset)');
     assert.match(s.last, /^Last VR session: \d+ frames a second on average \(the headset asks for \d+\), [\d.]+% of frames late, slowest \d+ ms, detail step \d, drawn through XR/);
+    assert.equal(s.said, s.last, 'and the line is on the page to be read');
+    assert.equal(s.saidShown, true);
     assert.equal(s.hud, true);
     assert.equal(s.hint, false);
     assert.equal(s.isPresenting, false);
