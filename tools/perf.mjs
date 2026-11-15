@@ -197,7 +197,7 @@ if (asJson) {
   const i = out.inventory;
   const pad = (v, n) => String(v).padStart(n);
   console.log(`What is in the scene`);
-  console.log(`  ${i.meshes} meshes (one draw call each when in view): terrain, lake, sky, sun, ${i.forestMeshes} forest batches, the ledge, the leaves, 2 dragons and their 2 mirror images`);
+  console.log(`  ${i.meshes} meshes (one draw call each when in view): terrain, lake, sky, sun, clouds, ${i.forestMeshes} forest batches, the ledge, the leaves, 2 dragons and their 2 mirror images`);
   console.log(`  forest   ${pad(i.trees, 6)} trees, instanced, ${i.forestTriangles} triangles in all`);
   console.log(`  terrain  ${pad(i.terrainTriangles, 6)} triangles (lit once at start, not per frame)`);
   console.log(`  ledge    ${pad(i.ledgeTriangles, 6)} triangles (7 trees close by, boulders, fallen leaves)`);

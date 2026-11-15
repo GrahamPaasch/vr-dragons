@@ -7,6 +7,7 @@
  *   SMOKE_ONLY=flat,quest1 npm run smoke     some of the parts: flat, phone, path, quest1, no3d
  *   SMOKE_CHANNEL=chrome npm run smoke       in the installed Google Chrome instead
  *   SMOKE_EXECUTABLE=/path/to/chrome npm run smoke
+ *   SMOKE_URL=https://www.grahampaasch.com/vr/dragons npm run smoke    the page as deployed
  *
  * The VR part uses Meta's Immersive Web Emulation Runtime (iwer), which stands in for the
  * headset: it supplies navigator.xr, a tracked head and two Touch controllers. It is injected
@@ -557,7 +558,9 @@ async function no3D(base) {
 
 const started = Date.now();
 await mkdir(OUT, { recursive: true });
-const { server, url } = await listen({});
+const LIVE = process.env.SMOKE_URL || '';
+const { server, url: localUrl } = await listen({});
+const url = LIVE || localUrl;
 let browser;
 try {
   if (process.env.SMOKE_EXECUTABLE) {
@@ -577,7 +580,7 @@ try {
   const wanted = (name) => only.length === 0 || only.includes(name);
   if (wanted('flat')) await flatScreen(browser, url);
   if (wanted('phone')) await phone(browser, url);
-  if (wanted('path')) await liveSitePath(browser);
+  if (wanted('path') && !LIVE) await liveSitePath(browser);
   if (wanted('quest1')) await quest1(browser, url);
   if (wanted('no3d')) await no3D(url);
 } finally {

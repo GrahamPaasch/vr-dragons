@@ -29,8 +29,9 @@ Sound matters here; headphones are best. It starts with your first tap, as brows
 
 - **The valley.** A quartzite bluff over a lake, in the spirit of the Baraboo hills: sugar maple,
   oak, birch, white pine and tamarack in stands, a gorge on the right where the creek leaves, a
-  grassy gap through the trees on the left, and a low sun shining down the length of the lake.
-  About 840 trees in the forest, and seven close ones round the ledge with real trunks and boughs.
+  grassy gap through the trees on the left, a low sun shining down the length of the lake, and a
+  few long clouds catching it. About 840 trees in the forest, and seven close ones round the ledge
+  with real trunks and boughs.
 - **The dragons.** Ember (red, 13.6 m across the wings) and Tarn (teal, smaller, quicker). Each is
   584 triangles on a 24-bone skeleton. They are not on rails: each chases a point that runs ahead
   of it along a hand-drawn lane, with a small flight model in between. It has to bank to turn, it
@@ -85,9 +86,9 @@ of an emulated Quest 1 together:
 
 | | draw calls | triangles |
 |---|---|---|
-| mean | 31 to 37 | 45,000 to 53,000 |
-| worst frame | 46 (23 an eye) | 62,000 (31,000 an eye) |
-| everything at once, nothing culled | 31 an eye | 35,000 an eye |
+| mean | 32 to 38 | 45,000 to 55,000 |
+| worst frame | 48 (24 an eye) | 66,000 (33,000 an eye) |
+| everything at once, nothing culled | 32 an eye | 37,000 an eye |
 
 The brief's limit was 150 draw calls. Two textures, ten shader programs.
 

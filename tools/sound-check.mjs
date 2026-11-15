@@ -134,7 +134,7 @@ async function renderAll(wantSamples) {
     };
   }
 
-  async function scene(name, seconds, setup, windows) {
+  async function scene(name, seconds, setup, windows, note) {
     const ctx = new OfflineAudioContext(2, Math.ceil(seconds * rate), rate);
     const board = new A.Soundscape({ hrtf: true, reverb: true, seed: 3 });
     board.attach(ctx, [1, 0.78]);
@@ -146,9 +146,10 @@ async function renderAll(wantSamples) {
       board.forestGain.gain.setValueAtTime(0, 0);
       board.mapleGain.gain.setValueAtTime(0, 0);
     };
-    setup(board, quiet);
+    setup(board, quiet, ctx);
     const buffer = await ctx.startRendering();
     const row = { name, seconds, all: measure(buffer) };
+    if (note) row.note = note(board);
     if (windows) row.windows = windows.map(([from, to, label]) => Object.assign({ label }, measure(buffer, from, to)));
     if (wantSamples) {
       // 16-bit stereo, as a base64 string.
@@ -237,6 +238,51 @@ async function renderAll(wantSamples) {
       }
     }, [[0, 2, 'far left'], [5, 6.5, 'coming'], [6.6, 7.4, 'overhead'], [7.6, 9, 'going'], [12, 14, 'far right']])
   );
+  // The real thing: the director flies, and the page's own per-frame code drives the sound, 72
+  // times a second, with the listener on the ledge facing the lake.
+  const F = await import('./src/flight.js');
+  const G = await import('./src/dragonGeometry.js');
+  const builds = G.DRAGONS.map((d) => ({ beat: d.beat, size: d.build.scale }));
+  const flight = (name, seconds, skip, callAt, windows) =>
+    scene(
+      name,
+      seconds,
+      (b, quiet, ctx) => {
+        const director = new F.Director(builds, 20261115);
+        const dt = 1 / 72;
+        for (let t = 0; t < skip; t += dt) director.step(dt);
+        director.drain();
+        const listener = { position: [0, 1.62, 0], forward: [0, 0, -1], up: [0, 1, 0] };
+        const movers = [{}, {}];
+        let called = false;
+        b.nearestSeen = Infinity;
+        for (let k = 1; k * dt < seconds; k++) {
+          ctx.suspend(k * dt).then(() => {
+            if (callAt !== null && !called && k * dt >= callAt) {
+              called = true;
+              b.whistle();
+              director.call();
+            }
+            director.step(dt);
+            for (const e of director.drain()) {
+              if (e.type === 'beat') b.beat(e.dragon, e.strength);
+              else if (e.type === 'roar') b.roar(e.dragon, e.kind, F.ROAR_SECONDS);
+            }
+            director.flyers.forEach((f, i) => {
+              const flat = Math.cos(f.gamma) * f.speed;
+              Object.assign(movers[i], { x: f.x, y: f.y, z: f.z, vx: flat * Math.sin(f.heading), vy: Math.sin(f.gamma) * f.speed, vz: flat * Math.cos(f.heading), speed: f.speed });
+            });
+            b.update(dt, listener, movers);
+            b.nearestSeen = Math.min(b.nearestSeen, b.nearest);
+            ctx.resume();
+          });
+        }
+      },
+      windows,
+      (b) => `wingbeats ${b.stats.beats}, roars ${b.stats.roars}, bird calls ${b.stats.birds}, gusts ${b.stats.gusts}, whistles ${b.stats.whistles || 0}; nearest dragon ${b.nearestSeen.toFixed(0)} m`
+    );
+  rows.push(await flight('the opening as flown: 50 s from the start', 50, 0, null, [[0, 7, 'far off, coming'], [10, 18, 'the eight, first loop'], [22, 32, 'the eight, second loop'], [42, 50, 'gone round the lake']]));
+  rows.push(await flight('a call, as flown: whistle at 3 s', 26, 95, 3, [[0, 3, 'before'], [3, 4, 'the whistle'], [4, 22, 'it comes and goes by'], [22, 26, 'after']]));
   return rows;
 }
 
@@ -264,6 +310,10 @@ try {
   for (const row of rows) {
     console.log(line(row.name, row.all));
     for (const w of row.windows || []) console.log(line('    ' + w.label, w));
+    if (row.note) console.log('    ' + row.note);
+    if (row.all.bad) problems.push(row.name + ': ' + row.all.bad + ' samples are not finite');
+    if (row.all.peak > -0.1) problems.push(row.name + ': clips (peak ' + row.all.peak.toFixed(1) + ' dB)');
+    if (row.all.loud < -70) problems.push(row.name + ': silent');
   }
   if (wantWav) {
     await mkdir(OUT, { recursive: true });
