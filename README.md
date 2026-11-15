@@ -187,6 +187,11 @@ lives in `public/vr/dragons/`, with `vr/dragons` in `STATIC_APP_DIRS` in `next.c
   measurement; the roar and the birds in particular want an ear.
 - Hands. In VR there is nothing where your controllers are.
 - The dragons never land, and they do not react to where you look.
+- The flight floor keeps bodies clear of everything and wings clear of the trees by the ledge,
+  but it does not know about wings elsewhere: in simulated hours of constant calling a wingtip
+  is inside a crown by the ledge for about a second an hour, and out in the forest a low pass
+  can brush a treetop.
+- The gorge has a creek bed but no water in it.
 
 ## Credits
 
