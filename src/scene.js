@@ -427,6 +427,58 @@ export class Stage {
     this.leaves = mesh;
   }
 
+  /**
+   * Words in the world, for the headset (where there is no page to read): a line of text that
+   * stands on the rim of the ledge in front of the viewer, fades in, and fades out again.
+   */
+  showHint(text, seconds) {
+    this.hideHint();
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 128;
+    const c = canvas.getContext('2d');
+    c.font = '600 60px Georgia, "Times New Roman", serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.lineJoin = 'round';
+    c.lineWidth = 10;
+    c.strokeStyle = 'rgba(26, 20, 16, 0.85)';
+    c.strokeText(text, 512, 66);
+    c.fillStyle = '#fbf3e4';
+    c.fillText(text, 512, 66);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0, depthWrite: false, depthTest: false, fog: false, toneMapped: false });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.7 / 8), material);
+    // On the rim, below the line of sight to the valley, turned up to face the viewer.
+    mesh.position.set(0, 0.78, -2.1);
+    mesh.lookAt(0, 1.55, 0);
+    mesh.renderOrder = 300;
+    this.scene.add(mesh);
+    this.hint = { mesh, material, texture, age: 0, seconds: seconds || 14, text };
+  }
+
+  hideHint() {
+    if (!this.hint) return;
+    this.scene.remove(this.hint.mesh);
+    this.hint.mesh.geometry.dispose();
+    this.hint.material.dispose();
+    this.hint.texture.dispose();
+    this.hint = null;
+  }
+
+  updateHint(dt) {
+    const h = this.hint;
+    if (!h) return;
+    h.age += dt;
+    const fadeIn = Math.min(Math.max((h.age - 2.5) / 1.5, 0), 1);
+    const fadeOut = Math.min(Math.max((h.seconds - h.age) / 2, 0), 1);
+    h.material.opacity = 0.95 * fadeIn * fadeOut;
+    h.mesh.visible = h.material.opacity > 0.01;
+    if (h.age > h.seconds) this.hideHint();
+  }
+
   /** Draw only this fraction of the leaves in the air. */
   setLeafFraction(fraction) {
     if (this.leaves) this.leaves.geometry.instanceCount = Math.max(0, Math.round(this.leaves.userData.full * fraction));
