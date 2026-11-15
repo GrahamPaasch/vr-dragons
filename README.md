@@ -91,16 +91,17 @@ of an emulated Quest 1 together:
 |---|---|---|
 | mean | 33 to 38 | 54,000 to 58,000 |
 | worst frame | 48 (24 an eye) | 69,000 (35,000 an eye) |
-| everything at once, nothing culled | 32 an eye | 37,000 an eye |
+| everything at once, nothing culled | 34 an eye | 37,000 an eye |
 
-The brief's limit was 150 draw calls. Two textures, ten shader programs.
+The brief's limit was 150 draw calls. Two textures, eleven shader programs, all compiled while
+the page loads so that the first roar does not cost a dropped frame.
 
 **What has not been measured** is the frame rate on a real Quest 1: the tests run in headless
 Chromium, which draws in software, so they can count but cannot time. After every VR session the
 page says how it went ("Last VR session: 72 frames a second on average (the headset asks for 72),
 0.3% of frames late, ..."), on the page and in `window.__dragons.state.vr.last`. If it does not
-hold 72, the address takes `?scale=0.8` (a smaller picture), `?trees=0.6`, `?hrtf=0` and
-`?reverb=0` to find out which part costs.
+hold 72, the address takes `?scale=0.8` (a smaller picture), `?aa=0`, `?trees=0.6`, `?hrtf=0`
+and `?reverb=0` to find out which part costs.
 
 ## Running it
 
@@ -143,6 +144,7 @@ tuned by ear yet.
 | `?scale=0.8` | VR picture size relative to the headset's own |
 | `?foveation=0.5` | how much the edges of the VR picture are coarsened, 0 to 1 |
 | `?layers=off` | draw VR through a plain XRWebGLLayer |
+| `?aa=0` | no anti-aliasing |
 | `?trees=0.6` | draw only this fraction of the forest |
 | `?hrtf=0` | place the dragons' sound with plain left/right panning |
 | `?reverb=0` | no echo off the hills |
