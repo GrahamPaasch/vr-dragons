@@ -9,7 +9,10 @@
     "serve": "node tools/serve.mjs",
     "smoke": "node tools/smoke.mjs",
     "perf": "node tools/perf.mjs",
+    "sound": "node tools/sound-check.mjs",
+    "fly": "node tools/flysim.mjs",
     "shots": "node tools/shots.mjs",
+    "sheet": "node tools/sheet.mjs",
     "map": "node tools/map.mjs"
   },
   "devDependencies": {

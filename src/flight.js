@@ -411,7 +411,7 @@ export const LANES = [
     [-200, 17, -120, 21],
     [-160, 10, -128, 21],
     ...FROM_LEFT,
-  ], { weight: 2 }),
+  ], { weight: 1.2 }),
 
   // Down at the near end of the lake and out through the gorge on the right, under the treetops.
   new Lane('gorge', 'in', 'out', [
@@ -438,7 +438,7 @@ export const LANES = [
     [104, 2, -100, 21],
     [70, -5, -110, 21],
     [52, -9, -134, 21],
-  ], { weight: 2 }),
+  ], { weight: 1.4 }),
 
   // Most of a circle round the ledge: across the front, over the gorge, over the trees behind.
   new Lane('orbit', 'in', 'out', [

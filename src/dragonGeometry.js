@@ -256,10 +256,10 @@ export const DRAGONS = [
     build: { scale: 1, neck: 1, tail: 1, wing: 1, bulk: 1, horn: 1 },
     beat: 1.0, // wingbeats a second at an easy pace
     colors: {
-      back: [0.42, 0.06, 0.05],
-      side: [0.72, 0.17, 0.07],
+      back: [0.56, 0.1, 0.06],
+      side: [0.74, 0.18, 0.07],
       belly: [0.93, 0.66, 0.26],
-      wingTop: [0.4, 0.07, 0.06],
+      wingTop: [0.64, 0.15, 0.07],
       wingUnder: [0.9, 0.4, 0.12],
       bone: [0.3, 0.07, 0.05],
       horn: [0.14, 0.1, 0.09],
@@ -271,10 +271,10 @@ export const DRAGONS = [
     build: { scale: 0.78, neck: 1.08, tail: 1.12, wing: 1.06, bulk: 0.9, horn: 1.25 },
     beat: 1.28,
     colors: {
-      back: [0.04, 0.22, 0.3],
-      side: [0.08, 0.42, 0.47],
+      back: [0.06, 0.3, 0.38],
+      side: [0.09, 0.44, 0.49],
       belly: [0.82, 0.88, 0.78],
-      wingTop: [0.06, 0.2, 0.28],
+      wingTop: [0.1, 0.38, 0.44],
       wingUnder: [0.5, 0.8, 0.76],
       bone: [0.05, 0.16, 0.22],
       horn: [0.86, 0.84, 0.74],

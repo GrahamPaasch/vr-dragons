@@ -389,7 +389,9 @@ export function dragonMaterial(shared, bones, options) {
         #ifdef DV_MIRROR
           c *= 0.55;
         #endif
-        vColor = dvDisplay(dvHaze(c, wp.xyz, 1.0));
+        // A little less haze than the land gets: down in the mist of the valley floor the
+        // dragons are what the eye is looking for, and they must not sink into it.
+        vColor = dvDisplay(dvHaze(c, wp.xyz, 0.72));
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
     `,
