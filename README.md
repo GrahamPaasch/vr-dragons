@@ -42,6 +42,8 @@ Sound matters here; headphones are best. It starts with your first tap, as brows
   and has the two fly them as a pair: one trailing the other, weaving, wingtip to wingtip, one
   above the other, corkscrewing round each other, swapping the lead. The one behind watches the
   one in front; both look at you when they are close.
+- **Fire.** About once a minute one of them roars, and breathes fire as it does: straight out
+  ahead, a jet as long as its own neck and tail. A dragon that you call does it on its way in.
 - **The lanes.** A figure of eight in front of the ledge; straight across the front at eye level;
   under the ledge, so you look down on their backs; round behind and down over your right
   shoulder; through the meadow gap; through the gorge under the treetops; low over the water and
@@ -50,8 +52,8 @@ Sound matters here; headphones are best. It starts with your first tap, as brows
   shoulder, chickadees in the trees by the ledge, a white-throated sparrow, a jay, crows far off,
   a woodpecker. The birds fall silent when a dragon is near, and for a while after a roar. Each
   dragon is a point in space: wingbeats that grow as it comes and arrive late from far off, the
-  hiss of a glide, a little higher in pitch coming than going, and a roar that comes back off the
-  hills a second later.
+  hiss of a glide, a little higher in pitch coming than going, and a roar (with the rush of its
+  fire) that comes back off the hills a second later. The trees sway harder when a gust is heard.
 
 Comfort: the viewer is stationary, nothing is attached to the head, and no dragon's body comes
 within 9 m of your head (the tests fly simulated hours to hold that; a wingtip can come to about
@@ -74,7 +76,8 @@ is bad at (pixels, draw calls) and leans on what it has to spare (vertices):
   the ones behind you are not drawn. The leaves in the air are one instanced draw call whose
   falling, drifting and tumbling is all in its vertex shader.
 - **Skinning in the shader.** Each dragon's 24 bones are posed on the CPU (about 0.01 ms) and
-  applied in the vertex shader; a dragon is one draw call.
+  applied in the vertex shader; a dragon is one draw call. Its fire is one more, 66 triangles
+  animated in their vertex shader, and only while it is breathing.
 - **Overdraw.** The sky is drawn last and only where nothing else is; there is no large
   see-through surface anywhere.
 - **A governor.** If frames keep coming late in VR, the forest and the leaves are thinned one step
@@ -104,7 +107,7 @@ hold 72, the address takes `?scale=0.8` (a smaller picture), `?trees=0.6`, `?hrt
 ```
 npm install          # only for the tools: playwright-core and iwer
 npm run serve        # http://localhost:8080
-npm test             # 38 unit tests of the pure modules
+npm test             # 39 unit tests of the pure modules
 npm run smoke        # the real page in headless Chromium: flat, phone, /vr/dragons, emulated Quest 1, no WebGL
 SMOKE_URL=https://www.grahampaasch.com/vr/dragons npm run smoke    # the same against the deployed page
 npm run perf         # draw calls and triangles per frame
@@ -126,8 +129,11 @@ a substitute for the headset.
 Nobody can listen to a headless test, so `npm run sound` renders each sound through the page's own
 audio graph on an OfflineAudioContext and measures it: level, left against right, and where the
 energy lies. The levels in `src/audio.js` were set from those numbers (wind about -35 dB in a
-calm and -23 in a gust, a wingbeat at 15 m about -20, a far roar -22, a called one -15, birds
--26 to -31, all relative to full scale). They have not been tuned by ear yet.
+calm and -23 in a gust, a wingbeat at 15 m about -20, a far roar -18, a called one -15, birds
+-26 to -31, all relative to full scale). It also renders the opening and a called pass as they
+are really flown, the director and the page's own per-frame code driving the sound 72 times a
+second, and fails on silence, clipping or a sample that is not a number. None of it has been
+tuned by ear yet.
 
 ### Things in the address
 

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BONE, BONE_COUNT, makeSkeleton, poseSkeleton, restPose, heave, skinPoint } from '../src/rig.js';
-import { buildDragon, DRAGONS } from '../src/dragonGeometry.js';
+import { buildDragon, buildFlame, DRAGONS } from '../src/dragonGeometry.js';
+import { ROAR_SECONDS } from '../src/flight.js';
 import { makeRng } from '../src/rng.js';
 
 const colours = (spec) => spec.colors;
@@ -173,4 +174,34 @@ test('the skeleton: 24 bones, parents before children, and the head turns to loo
   const shut = skinPoint(poseSkeleton(sk, restPose(), world, skin), BONE.jaw, chin, [0, 0, 0]);
   const open = skinPoint(poseSkeleton(sk, Object.assign(restPose(), { jaw: 1 }), world, skin), BONE.jaw, chin, [0, 0, 0]);
   assert.ok(open[1] < shut[1] - 0.3, 'the chin drops ' + (shut[1] - open[1]).toFixed(2) + ' m');
+});
+
+test('fire: a spray of tongues from the mouth, pointing the way the snout does', () => {
+  for (const spec of DRAGONS) {
+    const f = buildFlame(spec.build);
+    const s = spec.build.scale;
+    assert.ok(f.triangles >= 40 && f.triangles <= 120, 'triangles: ' + f.triangles);
+    assert.equal(f.position.length, f.vertices * 3);
+    assert.equal(f.dir.length, f.vertices * 3);
+    assert.equal(f.flame.length, f.vertices * 3);
+    assert.ok(Math.abs(f.length - 9.5 * s) < 1e-6);
+    // It starts where the mouth is: in front of the head joint, on the midline.
+    const sk = makeSkeleton(spec.build);
+    const head = sk.pos[BONE.head];
+    for (let i = 0; i < f.vertices; i++) {
+      const x = f.position[i * 3];
+      const y = f.position[i * 3 + 1];
+      const z = f.position[i * 3 + 2];
+      assert.ok(Math.abs(x) < 0.6 * s && Math.abs(y - head[1]) < 0.8 * s, 'at the mouth');
+      assert.ok(z > head[2] + 0.8 * s && z < head[2] + 2.2 * s, 'in front of the head: ' + (z - head[2]).toFixed(2));
+      const d = [f.dir[i * 3], f.dir[i * 3 + 1], f.dir[i * 3 + 2]];
+      assert.ok(Math.abs(Math.hypot(d[0], d[1], d[2]) - 1) < 1e-5, 'unit direction');
+      assert.ok(d[2] > 0.93, 'forward, inside a narrow cone');
+      assert.ok(f.flame[i * 3] >= 0 && f.flame[i * 3] <= 1);
+    }
+    // Every tongue has a tip that travels.
+    let tips = 0;
+    for (let i = 0; i < f.vertices; i++) if (f.flame[i * 3] > 0.5) tips++;
+    assert.equal(tips, f.triangles, 'one travelling corner per triangle');
+  }
 });

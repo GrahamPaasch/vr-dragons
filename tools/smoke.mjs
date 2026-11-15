@@ -259,6 +259,38 @@ async function flatScreen(browser, base) {
     assert.equal(s.free, true, 'and went back to the other one');
   });
 
+  await check('a roar comes with fire, and the fire goes out again', async () => {
+    const s = await app(page, async () => {
+      const d = window.__dragons;
+      const wait = (n) =>
+        new Promise((resolve) => {
+          const start = d.stage.renderer.info.render.frame;
+          const tick = () => (d.stage.renderer.info.render.frame >= start + n ? resolve() : setTimeout(tick, 8));
+          tick();
+        });
+      const before = d.dragons.map((x) => x.flame.visible);
+      const roars = d.audio.stats.roars;
+      d.director.roar(0, 'far');
+      let brightest = 0;
+      let seen = false;
+      for (let i = 0; i < 40; i++) {
+        await wait(2);
+        brightest = Math.max(brightest, d.dragons[0].fire);
+        seen = seen || d.dragons[0].flame.visible;
+        if (d.director.flyers[0].roar === 0 && i > 5) break;
+      }
+      await wait(3);
+      return { before, seen, brightest, after: d.dragons[0].flame.visible, other: d.dragons[1].flame.visible, heard: d.audio.stats.roars - roars, jaw: d.director.flyers[0].jaw };
+    });
+    assert.deepEqual(s.before, [false, false]);
+    assert.equal(s.seen, true, 'the fire was drawn');
+    assert.ok(s.brightest > 0.9, 'at full strength: ' + s.brightest.toFixed(2));
+    assert.equal(s.after, false, 'and it stops when the roar does');
+    assert.equal(s.other, false, 'only the one that roared');
+    assert.equal(s.heard, 1, 'the roar was heard');
+    assert.deepEqual(problems, []);
+  });
+
   await check('dragging looks around and stops the view following; a tap calls', async () => {
     const before = await app(page, () => ({ yaw: window.__dragons.view.yaw, calls: window.__dragons.state.calls }));
     await page.mouse.move(640, 300);
