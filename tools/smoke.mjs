@@ -356,7 +356,8 @@ async function liveSitePath(browser) {
 
 async function quest1(browser, base) {
   console.log('\nInside an emulated Oculus Quest 1 (WebXR immersive-vr)');
-  const { page, context, problems } = await open(browser, base, { xr: true, stereo: true, viewport: { width: 1280, height: 720 } });
+  // (?governor=off: software drawing is slow, and the budget check must count the whole picture.)
+  const { page, context, problems } = await open(browser, base + '?governor=off', { xr: true, stereo: true, viewport: { width: 1280, height: 720 } });
 
   await check('the page offers VR when a headset is present', async () => {
     await page.waitForFunction(() => !window.__dragons.state.vr.checking);
@@ -437,6 +438,7 @@ async function quest1(browser, base) {
       return out;
     });
     console.log('        most in any direction, both eyes: ' + worst.calls + ' draw calls, ' + worst.triangles + ' triangles');
+    assert.equal(await app(page, () => window.__dragons.state.quality), 0, 'counted at full detail');
     assert.ok(worst.calls <= 2 * BUDGET.calls, 'draw calls for two eyes: ' + worst.calls);
     assert.ok(worst.calls < 150, 'under the 150 the brief allows: ' + worst.calls);
     assert.ok(worst.triangles <= 2 * BUDGET.triangles, 'triangles for two eyes: ' + worst.triangles);
@@ -496,6 +498,7 @@ async function quest1(browser, base) {
         isPresenting: d.stage.renderer.xr.isPresenting,
       };
     });
+    console.log('        ' + s.last + ' (software drawing: says nothing about a headset)');
     assert.match(s.last, /^Last VR session: \d+ frames a second on average \(the headset asks for \d+\), [\d.]+% of frames late, slowest \d+ ms, detail step \d, drawn through XR/);
     assert.equal(s.hud, true);
     assert.equal(s.hint, false);
@@ -519,6 +522,36 @@ async function quest1(browser, base) {
 
   // A headset that refuses a floor-level space, and a browser without WebXR Layers.
   const plain = await open(browser, base + '?layers=off', { xr: true, stereo: true, viewport: { width: 1280, height: 720 } });
+  // And the governor itself, in the page: starve it of frames and it thins the forest.
+  await check('when frames keep coming late in VR the forest is thinned, and stays drawn', async () => {
+    await plain.page.waitForFunction(() => !window.__dragons.state.vr.checking);
+    const s = await app(plain.page, () => {
+      const d = window.__dragons;
+      const full = d.stage.forest.reduce((a, m) => a + m.count, 0);
+      const leaves = d.stage.leaves.geometry.instanceCount;
+      // What main.js does each VR frame, with frames that take three times too long.
+      let stepped = 0;
+      for (let i = 0; i < 144 * 12; i++) {
+        if (d.governor.frame(3 / 72, 1 / 72)) {
+          stepped++;
+          d.applyQuality();
+        }
+      }
+      return {
+        full, leaves, stepped, level: d.governor.level, quality: d.state.quality,
+        now: d.stage.forest.reduce((a, m) => a + m.count, 0),
+        leavesNow: d.stage.leaves.geometry.instanceCount,
+        mirrors: d.dragons.map((x) => x.mirrorOn),
+        batches: d.stage.forest.every((m) => m.count >= 1),
+      };
+    });
+    assert.equal(s.level, 3, 'it steps down to the last step and stops');
+    assert.equal(s.quality, 3);
+    assert.ok(s.now < s.full * 0.55 && s.now > s.full * 0.4, 'trees drawn: ' + s.now + ' of ' + s.full);
+    assert.ok(s.leavesNow < s.leaves * 0.3, 'leaves in the air: ' + s.leavesNow + ' of ' + s.leaves);
+    assert.deepEqual(s.mirrors, [false, false]);
+    assert.equal(s.batches, true, 'every batch of the forest still has a tree in it');
+  });
   await check('?layers=off draws through a plain XRWebGLLayer', async () => {
     await plain.page.waitForFunction(() => !window.__dragons.state.vr.checking);
     await plain.page.click('#enterVR');

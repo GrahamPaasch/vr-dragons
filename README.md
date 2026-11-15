@@ -86,8 +86,8 @@ of an emulated Quest 1 together:
 
 | | draw calls | triangles |
 |---|---|---|
-| mean | 32 to 38 | 45,000 to 55,000 |
-| worst frame | 48 (24 an eye) | 66,000 (33,000 an eye) |
+| mean | 33 to 38 | 54,000 to 58,000 |
+| worst frame | 48 (24 an eye) | 69,000 (35,000 an eye) |
 | everything at once, nothing culled | 32 an eye | 37,000 an eye |
 
 The brief's limit was 150 draw calls. Two textures, ten shader programs.
@@ -106,6 +106,7 @@ npm install          # only for the tools: playwright-core and iwer
 npm run serve        # http://localhost:8080
 npm test             # 38 unit tests of the pure modules
 npm run smoke        # the real page in headless Chromium: flat, phone, /vr/dragons, emulated Quest 1, no WebGL
+SMOKE_URL=https://www.grahampaasch.com/vr/dragons npm run smoke    # the same against the deployed page
 npm run perf         # draw calls and triangles per frame
 npm run sound        # renders every sound offline and measures it (add -- --wav to write files)
 npm run fly -- 60 7 --calls --map    # fly an hour on seed 7 with calls, report clearances, draw the paths
@@ -139,6 +140,7 @@ calm and -23 in a gust, a wingbeat at 15 m about -20, a far roar -22, a called o
 | `?trees=0.6` | draw only this fraction of the forest |
 | `?hrtf=0` | place the dragons' sound with plain left/right panning |
 | `?reverb=0` | no echo off the hills |
+| `?governor=off` | never thin the picture, whatever the frame rate (the tools count with this) |
 
 ## How it is put together
 

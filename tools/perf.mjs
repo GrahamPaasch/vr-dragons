@@ -80,7 +80,7 @@ async function measure({ seconds, every, mode, xr }) {
     const sorted = list.slice().sort((a, b) => a - b);
     return { mean: list.reduce((a, b) => a + b, 0) / list.length, p95: sorted[Math.floor(sorted.length * 0.95)], max: sorted[sorted.length - 1] };
   };
-  return { frames: n, calls: stat(calls), triangles: stat(triangles), worst };
+  return { frames: n, calls: stat(calls), triangles: stat(triangles), worst, detailStep: d.state.quality };
 }
 
 /** Runs in the page: what the scene is made of, and the cost of the page's own work per frame. */
@@ -169,7 +169,7 @@ try {
     device.position.set(0, 1.62, 0);
     window.__xrDevice = device;
   });
-  await vr.goto(url + '?seed=20261115', { waitUntil: 'load' });
+  await vr.goto(url + '?seed=20261115&governor=off', { waitUntil: 'load' });
   await vr.waitForFunction(() => window.__dragons && window.__dragons.ready && !window.__dragons.state.vr.checking, null, { timeout: 60000 });
   await vr.click('#enterVR');
   await vr.waitForFunction(() => window.__dragons.state.vr.presenting, null, { timeout: 15000 });
@@ -187,6 +187,9 @@ try {
   server.close();
 }
 
+for (const part of [out.flatFollow, out.flatSweep, out.vrFollow, out.vrSweep]) {
+  if (part.detailStep !== 0) out.problems.push('the picture was thinned (detail step ' + part.detailStep + ') while it was being counted');
+}
 const worstCalls = Math.max(out.vrFollow.calls.max, out.vrSweep.calls.max);
 const worstTriangles = Math.max(out.vrFollow.triangles.max, out.vrSweep.triangles.max);
 out.verdict = { worstCallsBothEyes: worstCalls, worstTrianglesBothEyes: worstTriangles, insideBudget: worstCalls < BUDGET.calls };
