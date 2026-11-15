@@ -36,6 +36,8 @@ const SLOWEST = 12.5;
 export const VIEWER = [0, 1.62, 0];
 /** No dragon's body comes nearer to the viewer's head than this (metres). */
 export const KEEP_OUT = 9;
+/** The flight floor's dome over the viewer is a little bigger, because a dragon follows the floor loosely. */
+const DOME = KEEP_OUT + 1.2;
 
 const wrap = (a) => {
   let x = a % TAU;
@@ -51,6 +53,8 @@ const wrap = (a) => {
  * 10 m outward before the heights are taken: the edge of a gap is where the leaves end, not
  * where the trunks do.
  */
+/** How far out from a crown by the ledge the body keeps, for its wings (metres). */
+const WING_ROOM = 5.5;
 const FLOOR_HALF = 470;
 const FLOOR_STEP = 5;
 let floorCache = null;
@@ -112,12 +116,14 @@ export function flightFloor(x, z) {
     for (let i = 0; i < HERO_TREES.length; i++) {
       const t = HERO_TREES[i];
       const d = Math.hypot(x - t.x, z - t.z);
-      // A cone of clear air over each crown.
-      const top = t.height + 3 - Math.max(d - t.radius, 0) * 1.4;
+      // Clear air over each crown and for a wing's length round it, so that a dragon going by
+      // beside the tree does not sweep a wing through its leaves. Further out the tree does
+      // not count: the lanes that pass below the ledge fly under and in front of these crowns.
+      const top = t.height + 3 - Math.max(d - t.radius - WING_ROOM, 0) * 3;
       if (top > h) h = top;
     }
-    if (r2 < KEEP_OUT * KEEP_OUT) {
-      const dome = VIEWER[1] + Math.sqrt(KEEP_OUT * KEEP_OUT - r2) + 0.5;
+    if (r2 < DOME * DOME) {
+      const dome = VIEWER[1] + Math.sqrt(DOME * DOME - r2) + 0.3;
       if (dome > h) h = dome;
     }
   }
@@ -377,7 +383,7 @@ export const LANES = [
     [30, 41, 92, 17],
     [48, 37, 66, 17],
     [42, 31.5, 42, 16, 1],
-    [7.5, 13.4, 3, 15, 1],
+    [7.5, 14.9, 3, 15, 1],
     [-7, 2.2, -22, 19, 1],
     [-14, -13, -56, 24],
     [-6, -18, -98, 23],
@@ -729,6 +735,61 @@ export class Flyer {
 
 export const ROAR_SECONDS = 1.9;
 
+/**
+ * Where a called dragon goes by. It comes straight at the ledge along (ux, uz), passes to one
+ * side of the viewer with a wing over their head, and may turn a little as it leaves. Which
+ * side, how far out, how high and which way out is settled by what stands in the way: every
+ * combination is tried, each as low as the flight floor along it allows (the dragon may still
+ * be coming down as it arrives, and may climb steeply once it is past), and the one that brings
+ * it nearest wins.
+ * Returns { point: [x, y, z] beside the viewer, turn: radians to turn after it (positive: left),
+ * near: metres from the viewer's head, side: +1 or -1 }.
+ */
+export function planPass(ux, uz, size, prefer) {
+  const lowest = VIEWER[1] + 8 + 1.6 * size;
+  const best = { point: [0, 0, 0], turn: 0, near: Infinity, side: 0 };
+  for (let k = -1; k <= 1; k += 2) {
+    for (let i = 0; i < PASS_SIDES.length; i++) {
+      const off = PASS_SIDES[i] + 1.2 * size;
+      const px = VIEWER[0] + uz * off * k;
+      const pz = VIEWER[2] - ux * off * k;
+      // Coming in: it can be dropping at about 17 degrees.
+      let arrive = lowest;
+      for (let s = -30; s <= 0; s += 3) {
+        const need = flightFloor(px + ux * s, pz + uz * s) + 1 + s * 0.3;
+        if (need > arrive) arrive = need;
+      }
+      for (let j = 0; j < PASS_TURNS.length; j++) {
+        const turn = PASS_TURNS[j];
+        // Heading grows turning left, and (sin, cos) of it is the direction of travel.
+        const ex = ux * Math.cos(turn) + uz * Math.sin(turn);
+        const ez = uz * Math.cos(turn) - ux * Math.sin(turn);
+        let y = arrive;
+        for (let s = 3; s <= 39; s += 3) {
+          // It takes a moment to get its nose up: the climb counts from 6 m past the point.
+          const need = flightFloor(px + ex * s, pz + ez * s) + 1 - Math.max(s - 6, 0) * 0.5;
+          if (need > y) y = need;
+        }
+        // Straight on is preferred to a turn that gains next to nothing, and the side already
+        // chosen (`prefer`, when the plan is being brought up to date) to one barely better.
+        const near = Math.hypot(off, y - VIEWER[1]) + Math.abs(turn) * 0.8 - (k === prefer ? 1.5 : 0);
+        if (near < best.near) {
+          best.near = near;
+          best.side = k;
+          best.turn = turn;
+          best.point[0] = px;
+          best.point[1] = y;
+          best.point[2] = pz;
+        }
+      }
+    }
+  }
+  best.near = Math.hypot(best.point[0] - VIEWER[0], best.point[1] - VIEWER[1], best.point[2] - VIEWER[2]);
+  return best;
+}
+const PASS_SIDES = [4.5, 6, 8, 10.5];
+const PASS_TURNS = [0, 20 * DEG, -20 * DEG, 40 * DEG, -40 * DEG];
+
 // ---------------------------------------------------------------------------------------------
 // The director
 // ---------------------------------------------------------------------------------------------
@@ -937,19 +998,13 @@ export class Director {
     let who = free[0];
     if (dist(who) < 45 && free.length > 1) who = free[1];
     const f = this.flyers[who];
-    // Pass over the viewer's right or left, whichever side is clear of the big maple.
     const dx = VIEWER[0] - f.x;
     const dz = VIEWER[2] - f.z;
     const d = Math.hypot(dx, dz) || 1;
     const ux = dx / d;
     const uz = dz / d;
-    const up = 8 + 1.6 * f.size;
-    const side = 5.5 + 1.2 * f.size;
-    const maple = HERO_TREES[0];
-    const candidates = [1, -1].map((k) => [VIEWER[0] + uz * side * k, VIEWER[1] + up, VIEWER[2] - ux * side * k]);
-    const away = (p) => Math.hypot(p[0] - maple.x, p[2] - maple.z);
-    const pass = away(candidates[0]) > away(candidates[1]) ? candidates[0] : candidates[1];
-    this.jobs[who] = { phase: 'come', pass, dir: [ux, uz], t: 0, roared: false };
+    const plan = planPass(ux, uz, f.size);
+    this.jobs[who] = { phase: 'come', pass: plan.point, turn: plan.turn, side: plan.side, dir: [ux, uz], exit: [ux, uz], t: 0, replan: 0.4, roared: false };
     this.callAt = this.time;
     this.events.push({ type: 'call', dragon: who });
     return who;
@@ -1192,27 +1247,52 @@ export class Director {
       carrot[1] = job.pass[1];
       carrot[2] = job.pass[2];
       const d = Math.hypot(job.pass[0] - f.x, job.pass[2] - f.z);
+      // It was called from wherever it happened to be, and has to turn before it can come:
+      // the line it will arrive on is not known at first. The plan is brought up to date as
+      // it comes, until it is close.
+      job.replan -= dt;
+      if (job.replan <= 0 && d > 42) {
+        job.replan = 0.4;
+        const vx = VIEWER[0] - f.x;
+        const vz = VIEWER[2] - f.z;
+        const vl = Math.hypot(vx, vz) || 1;
+        const plan = planPass(vx / vl, vz / vl, f.size, job.side);
+        job.pass = plan.point;
+        job.turn = plan.turn;
+        job.side = plan.side;
+      }
       if (!job.roared && d < 95) {
         job.roared = true;
         this.roar(i, 'call');
       }
       if (d < 24 || job.t > 40) {
-        // Close: keep the line it is on, straight over and out the other side.
+        // Close: keep the line it is on, straight through the point beside the viewer, and
+        // then out the way that was planned.
         job.phase = 'go';
         job.t = 0;
-        job.dir = [Math.sin(f.heading), Math.cos(f.heading)];
-        job.from = [f.x, f.z];
+        const h = f.heading;
+        job.dir = [Math.sin(h), Math.cos(h)];
+        job.exit = [Math.sin(h + job.turn), Math.cos(h + job.turn)];
         this.events.push({ type: 'pass', dragon: i });
       }
       // Fast on the way in, slow enough over the ledge to be seen.
       return d > 90 ? 27 : lerp(14.5, 27, clamp((d - 30) / 60, 0, 1));
     }
-    // 'go': on past the viewer, then back to the other dragon.
-    carrot[0] = job.pass[0] + job.dir[0] * 90;
-    carrot[1] = job.pass[1] + 6;
-    carrot[2] = job.pass[2] + job.dir[1] * 90;
+    // 'go': through the point, on past the viewer, then back to the other dragon.
     const gone = (f.x - job.pass[0]) * job.dir[0] + (f.z - job.pass[2]) * job.dir[1];
-    if (gone > 48 || job.t > 12) this.jobs[i] = null;
+    if (gone < 0) {
+      // Not there yet. The point it chases is kept close in front of it, so that it does not
+      // start climbing for the trees beyond until it has gone by.
+      carrot[0] = job.pass[0] + job.dir[0] * 8;
+      carrot[1] = job.pass[1];
+      carrot[2] = job.pass[2] + job.dir[1] * 8;
+    } else {
+      carrot[0] = job.pass[0] + job.exit[0] * 90;
+      carrot[1] = job.pass[1] + 6;
+      carrot[2] = job.pass[2] + job.exit[1] * 90;
+    }
+    const out = (f.x - job.pass[0]) * job.exit[0] + (f.z - job.pass[2]) * job.exit[1];
+    if (out > 48 || job.t > 12) this.jobs[i] = null;
     return toViewer < 30 ? 15 : 21;
   }
 

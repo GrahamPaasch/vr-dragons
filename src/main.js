@@ -138,7 +138,7 @@ function build() {
 
   // For the tools and tests, and for poking at it from a console.
   window.__dragons = {
-    stage, view, state, THREE, dragons, director, audio, xr, governor, seek, call, begin,
+    stage, view, state, THREE, dragons, director, audio, xr, governor, seek, fly, call, begin,
     ready: true,
     buildMs: state.buildMs,
     setFlatShot: () => {
@@ -437,6 +437,16 @@ function seek(t) {
   }
   director.drain();
   state.time = t;
+  pose(dt);
+  stage.update(state.time);
+}
+
+/** Fly on by this many seconds without drawing (for the tools, with the clock paused). */
+function fly(seconds) {
+  const dt = 1 / 72;
+  for (let t = 0; t < seconds - 1e-9; t += dt) director.step(dt);
+  director.drain();
+  state.time += seconds;
   pose(dt);
   stage.update(state.time);
 }

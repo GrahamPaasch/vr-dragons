@@ -267,7 +267,7 @@ export function forestDensity(x, z) {
  */
 export const HERO_TREES = [
   { x: -7.5, z: 5.5, height: 15, radius: 5.6, kind: 'maple' },
-  { x: 13, z: 10.5, height: 11, radius: 3, kind: 'birch' },
+  { x: 18.5, z: 13.5, height: 11, radius: 3, kind: 'birch' },
   { x: -16.5, z: 13, height: 14, radius: 6, kind: 'oak' },
   { x: 27, z: 9, height: 19, radius: 3.4, kind: 'pine' },
   { x: -3, z: 19, height: 13, radius: 5, kind: 'maple2' },
