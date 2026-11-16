@@ -22,6 +22,8 @@ const wantWav = process.argv.includes('--wav');
 /** Runs in the page. Returns one row of measurements per scene (and the samples, if asked). */
 async function renderAll(wantSamples) {
   const A = await import('./src/audio.js');
+  // How big each dragon sounds, as the page tells the sound (main.js, unlockSound).
+  const VOICES = (await import('./src/dragonGeometry.js')).DRAGONS.map((d) => d.voice);
   const rate = 48000;
   const db = (x) => (x > 0 ? 20 * Math.log10(x) : -200);
 
@@ -177,7 +179,7 @@ async function renderAll(wantSamples) {
     const tone = 1000;
     const ctx = new OfflineAudioContext(2, seconds * rate, rate);
     const board = new A.Soundscape({ hrtf, reverb: false, seed: 3 });
-    board.attach(ctx, [1, 0.78]);
+    board.attach(ctx, VOICES);
     hush(board);
     const osc = ctx.createOscillator();
     osc.frequency.value = tone;
@@ -213,7 +215,7 @@ async function renderAll(wantSamples) {
   async function scene(name, seconds, setup, windows, note) {
     const ctx = new OfflineAudioContext(2, Math.ceil(seconds * rate), rate);
     const board = new A.Soundscape({ hrtf: true, reverb: true, seed: 3 });
-    board.attach(ctx, [1, 0.78]);
+    board.attach(ctx, VOICES);
     if (ctx.listener.positionY) ctx.listener.positionY.value = 1.62;
     // The air is always there; scenes that are about something else turn it off, and the
     // birds with it.
@@ -360,13 +362,15 @@ async function renderAll(wantSamples) {
           for (const e of director.drain()) {
             if (only === 'air') continue;
             if (e.type === 'beat') b.beat(e.dragon, e.strength);
-            else if (e.type === 'roar') b.roar(e.dragon, e.kind, F.ROAR_SECONDS);
+            // (With the dragons alone the question is whether one is heard to COME: a roar
+            // from across the lake, which happens when it happens, is left out of that.)
+            else if (e.type === 'roar' && only !== 'dragons') b.roar(e.dragon, e.kind, F.ROAR_SECONDS);
             else if (e.type === 'call') b.cry(e.dragon, 'answer');
             else if (e.type === 'busy') b.cry(e.dragon, 'busy');
           }
           director.flyers.forEach((f, i) => {
             const flat = Math.cos(f.gamma) * f.speed;
-            Object.assign(movers[i], { x: f.x, y: f.y, z: f.z, vx: flat * Math.sin(f.heading), vy: Math.sin(f.gamma) * f.speed, vz: flat * Math.cos(f.heading), speed: f.speed, beating: f.power });
+            Object.assign(movers[i], { x: f.x, y: f.y, z: f.z, vx: flat * Math.sin(f.heading), vy: Math.sin(f.gamma) * f.speed, vz: flat * Math.cos(f.heading), speed: f.speed, beating: f.power, cupped: f.brake });
           });
           b.update(dt, EARS, only === 'air' ? [] : movers);
           if (only !== 'air') b.nearestSeen = Math.min(b.nearestSeen, b.nearest);
@@ -375,7 +379,7 @@ async function renderAll(wantSamples) {
       windows,
       (b) => `wingbeats ${b.stats.beats}, roars ${b.stats.roars}, calls ${b.stats.cries || 0}, bird calls ${b.stats.birds}, gusts ${b.stats.gusts}, whistles ${b.stats.whistles || 0}` + (only === 'air' ? '' : `; nearest dragon ${b.nearestSeen.toFixed(0)} m`)
     );
-  rows.push(await flight('the opening as flown: 50 s from the start', 50, 0, null, [[0, 7, 'far off, coming'], [10, 18, 'the eight, first loop'], [22, 32, 'the eight, second loop'], [42, 50, 'gone round the lake']]));
+  rows.push(await flight('the opening as flown: 50 s from the start', 50, 0, null, [[0, 7, 'far off, coming'], [10, 18, 'up over the ledge, on the left'], [20, 25, 'round behind'], [26.5, 31.5, 'the swoop: the big one, wings set'], [31.5, 35, 'and the other'], [42, 50, 'gone out over the lake']]));
   rows.push(await flight('a call, as flown: whistle at 3 s', 26, 130, 3, [[0, 3, 'before'], [3, 4.5, 'the whistle and the answer'], [4.5, 22, 'it comes and goes by'], [22, 26, 'after']]));
 
   // The near passes as they are really flown: is a dragon heard to come? Each is rendered

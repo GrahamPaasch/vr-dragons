@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { encodePng } from './png.mjs';
 import * as W from '../src/world.js';
 import * as F from '../src/flight.js';
+import { BONE_COUNT, makeSkeleton, restPose, poseFromFlyer, wingReach } from '../src/rig.js';
 import { DRAGONS } from '../src/dragonGeometry.js';
 import { makeRng } from '../src/rng.js';
 
@@ -85,12 +86,19 @@ const dt = 1 / 72;
 const steps = Math.round(minutes * 60 * 72);
 const rng = makeRng(seed + 99);
 let nextCall = 20 + rng() * 20;
+// The dragons' wings, to know how near a wingtip comes to the viewer's head.
+const skeletons = DRAGONS.map((d) => makeSkeleton(d.build));
+const poses = [restPose(), restPose()];
+const boneWorld = new Float32Array(BONE_COUNT * 12);
+const boneSkin = new Float32Array(BONE_COUNT * 12);
 const stats = {
+  minTip: Infinity, flips: 0, hardTime: 0, rate2: 0,
   minFloor: Infinity, minGround: Infinity, minViewer: Infinity, minSep: Infinity, maxBank: 0, maxBankRate: 0, maxOmega: 0,
   maxSpeed: 0, minSpeed: Infinity, treeHits: 0, floorHits: 0, callsMade: 0, callsAnswered: 0, passes: 0, beats: 0, roars: 0,
   flapTime: 0, glideTime: 0, nearTime: 0, midTime: 0, farTime: 0, maxLag: 0, frontTime: 0, maxOffTight: 0,
 };
 const lanesFlown = {};
+const leaning = [0, 0];
 const trail = [[], []];
 let lastLane = '';
 const where = {};
@@ -131,6 +139,21 @@ for (let n = 0; n < steps; n++) {
       stats.minViewer = v;
       where.viewer = `${lane} t=${director.time.toFixed(0)}s job=${director.jobs[i] ? director.jobs[i].phase : '-'}`;
     }
+    if (v < 36) {
+      const tip = wingReach(skeletons[i], poseFromFlyer(poses[i], f, director.time), f, F.VIEWER, boneWorld, boneSkin);
+      if (tip < stats.minTip) {
+        stats.minTip = tip;
+        where.tip = `${lane} t=${director.time.toFixed(0)}s job=${director.jobs[i] ? director.jobs[i].phase : '-'}, body ${v.toFixed(1)} m off, ${f.power > 0.2 ? 'beating' : 'gliding'}`;
+      }
+    }
+    // How restless: rolling from one wing to the other, banked hard, and how fast it rolls.
+    const lean = f.bank > 0.35 ? 1 : f.bank < -0.35 ? -1 : 0;
+    if (lean && lean !== leaning[i]) {
+      if (leaning[i]) stats.flips++;
+      leaning[i] = lean;
+    }
+    if (Math.abs(f.bank) > (50 * Math.PI) / 180) stats.hardTime += dt;
+    stats.rate2 += f.bankRate * f.bankRate;
     stats.maxBank = Math.max(stats.maxBank, Math.abs(f.bank));
     stats.maxBankRate = Math.max(stats.maxBankRate, Math.abs(f.bankRate));
     stats.maxOmega = Math.max(stats.maxOmega, Math.abs(f.omega));
@@ -175,6 +198,8 @@ console.log(`\nFlew ${minutes} min, seed ${seed}${calls ? ', with calls' : ''}:`
 console.log(`  lowest above the flight floor ${stats.minFloor.toFixed(1)} m  [${where.floor}]`);
 console.log(`  lowest above ground or water  ${stats.minGround.toFixed(1)} m; steps well under the floor ${stats.floorHits} (deepest ${Math.max(director.flyers[0].deepest, director.flyers[1].deepest).toFixed(1)} m); bodies inside a tree crown ${stats.treeHits}${where.tree ? '  [' + where.tree + ']' : ''}`);
 console.log(`  nearest to the viewer ${stats.minViewer.toFixed(1)} m  [${where.viewer}]; nearest to each other ${stats.minSep.toFixed(1)} m  [${where.sep}]`);
+console.log(`  nearest a wingtip comes to the viewer's head ${stats.minTip.toFixed(1)} m  [${where.tip}]`);
+console.log(`  restlessness: each rolls from one wing to the other ${(stats.flips / 2 / minutes).toFixed(1)} times a minute, is banked beyond 50 deg ${pct(stats.hardTime)} of the time, and rolls at ${((Math.sqrt(stats.rate2 / (steps * 2)) * 180) / Math.PI).toFixed(0)} deg/s (rms)`);
 console.log(`  speed ${stats.minSpeed.toFixed(1)} .. ${stats.maxSpeed.toFixed(1)} m/s; steepest bank ${((stats.maxBank * 180) / Math.PI).toFixed(0)} deg; fastest roll ${((stats.maxBankRate * 180) / Math.PI).toFixed(0)} deg/s; fastest turn ${((stats.maxOmega * 180) / Math.PI).toFixed(0)} deg/s`);
 console.log(`  beating ${pct(stats.flapTime)}, gliding ${pct(stats.glideTime)}; wingbeats ${stats.beats}; roars ${stats.roars}`);
 console.log(`  within 40 m ${pct(stats.nearTime)}, 40-160 m ${pct(stats.midTime)}, beyond ${pct(stats.farTime)}; in the forward view ${pct(stats.frontTime)}`);

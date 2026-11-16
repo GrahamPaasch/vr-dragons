@@ -32,6 +32,9 @@ import { SUN_DIR } from './world.js';
 
 /** How many of the sparks in the air are alight when no dragon has breathed fire for a while (0..1). */
 const EMBER_REST = 0.35;
+/** How far off the wake of a dragon is first felt on the ledge, and how near it is felt in full (metres). */
+const WAKE_FAR = 34;
+const WAKE_NEAR = 17;
 
 const params = new URLSearchParams(location.search);
 const number = (name) => {
@@ -82,8 +85,8 @@ let governor;
 const target = { x: 0, y: 0, z: -150 };
 const listener = { position: [0, 1.62, 0], forward: [0, 0, -1], up: [0, 1, 0] };
 const movers = [
-  { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, speed: 0, beating: 0 },
-  { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, speed: 0, beating: 0 },
+  { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, speed: 0, beating: 0, cupped: 0 },
+  { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, speed: 0, beating: 0, cupped: 0 },
 ];
 const tmpHead = new THREE.Vector3();
 const head = [0, 1.62, 0]; // where the viewer's head is, in the world
@@ -319,8 +322,9 @@ function surroundings(dt) {
     const dz = f.z - head[2];
     const d = Math.hypot(dx, dy, dz) || 1;
     if (d < nearest) nearest = d;
-    // The wake: felt inside 26 m, hard inside 14. It goes the way the dragon goes, and down.
-    const w = Math.min(Math.max((26 - d) / 12, 0), 1) * f.size;
+    // The wake: felt inside 34 m, hard inside 17 (an animal of twenty metres moves a lot of
+    // air), and more of it from the bigger one. It goes the way the dragon goes, and down.
+    const w = Math.min(Math.max((WAKE_FAR - d) / (WAKE_FAR - WAKE_NEAR), 0), 1) * f.size;
     if (w > wake) wake = w;
     const flat = Math.cos(f.gamma);
     gx += w * (5.5 * flat * Math.sin(f.heading));
@@ -330,7 +334,7 @@ function surroundings(dt) {
     // one far off.
     if (dragons[i].fire > 0.2) fire = Math.max(fire, Math.min(Math.max(1.25 - d / 200, 0.45), 1));
     // Covering the sun: how near the line from the head to the sun its body is, against how
-    // wide it looks from here. (Wings and all it is about 9 m across in the mean.)
+    // wide it looks from here. (Wings and all, a dragon of size 1 is about 9 m across in the mean.)
     const along = (dx * SUN_DIR[0] + dy * SUN_DIR[1] + dz * SUN_DIR[2]) / d;
     if (along > 0.9) {
       const off = Math.acos(Math.min(along, 1));
@@ -440,6 +444,7 @@ function hear(dt) {
       m.vz = flat * Math.cos(f.heading);
       m.speed = f.speed;
       m.beating = f.power;
+      m.cupped = f.brake;
     }
     audio.setWash(state.wake);
     audio.update(dt, listener, movers);
@@ -465,7 +470,8 @@ function soundBroke(err) {
 
 function unlockSound() {
   sound(() => {
-    if (audio.unlock(DRAGONS.map((d) => d.build.scale))) audio.setMuted(!state.sound);
+    // (How big each one sounds, not how big it is drawn: see `voice` in dragonGeometry.js.)
+    if (audio.unlock(DRAGONS.map((d) => d.voice))) audio.setMuted(!state.sound);
   });
 }
 

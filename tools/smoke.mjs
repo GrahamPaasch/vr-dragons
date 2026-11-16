@@ -187,7 +187,7 @@ async function flatScreen(browser, base) {
       };
     });
     assert.ok(s.time < 1.5, 'the flight starts over: ' + s.time.toFixed(2) + ' s in');
-    assert.deepEqual(s.lanes.slice(0, 2), ['far turn', 'eight'], 'the opening is the scripted one');
+    assert.deepEqual(s.lanes.slice(0, 2), ['far turn', 'sweep'], 'the opening is the scripted one');
     assert.ok(s.far.every((d) => d > 150), 'the dragons begin far out over the lake: ' + s.far.map((d) => d.toFixed(0)).join(', ') + ' m');
     assert.equal(s.voices, 2);
     assert.equal(s.follow, true);
@@ -210,7 +210,7 @@ async function flatScreen(browser, base) {
     assert.ok(after.flyers[0][3] + after.flyers[1][3] > before[0][3] + before[1][3], 'wingbeats are counted');
     assert.ok(after.beats > 0, 'and heard: ' + after.beats);
     assert.ok(after.gusts > 0, 'the wind is blowing');
-    assert.ok(after.closest > 9, 'nearest to the viewer so far: ' + after.closest.toFixed(1) + ' m');
+    assert.ok(after.closest > 11, 'nearest to the viewer so far: ' + after.closest.toFixed(1) + ' m');
   });
 
   await check('Space whistles and a dragon answers the call', async () => {
@@ -234,7 +234,7 @@ async function flatScreen(browser, base) {
     assert.equal(again.answered, 1);
   });
 
-  await check('the called dragon passes close by, roars, and never comes nearer than 9 m', async () => {
+  await check('the called dragon glides by close with its wings set, roars, and never comes nearer than 11 m', async () => {
     // Run the flight ahead rather than wait half a minute.
     const s = await app(page, () => {
       const d = window.__dragons;
@@ -243,6 +243,8 @@ async function flatScreen(browser, base) {
       let roared = false;
       let nearest = Infinity;
       let up = 0;
+      let beating = 0;
+      let set = 0;
       for (let i = 0; i < 72 * 50 && !(passed && !d.director.jobs.some(Boolean)); i++) {
         d.director.step(dt);
         for (const e of d.director.drain()) {
@@ -254,16 +256,19 @@ async function flatScreen(browser, base) {
           if (d.director.jobs[k] && d.director.jobs[k].phase !== 'out' && range < nearest) {
             nearest = range;
             up = (Math.atan2(f.y - 1.62, Math.hypot(f.x, f.z)) * 180) / Math.PI;
+            beating = f.power;
+            set = f.set;
           }
         });
       }
-      return { passed, roared, nearest, up, free: !d.director.jobs.some(Boolean) };
+      return { passed, roared, nearest, up, beating, set, free: !d.director.jobs.some(Boolean) };
     });
     assert.equal(s.passed, true, 'it came past');
     assert.equal(s.roared, true, 'it roared on the way in');
-    assert.ok(s.nearest < 16, 'close: ' + s.nearest.toFixed(1) + ' m');
-    assert.ok(s.nearest >= 9, 'but not too close: ' + s.nearest.toFixed(1) + ' m');
+    assert.ok(s.nearest < 18, 'close: ' + s.nearest.toFixed(1) + ' m');
+    assert.ok(s.nearest >= 11, 'but not too close: ' + s.nearest.toFixed(1) + ' m');
     assert.ok(s.up > 15 && s.up < 45, 'where it can be watched, not overhead: ' + s.up.toFixed(0) + ' degrees up');
+    assert.ok(s.set > 0.8 && s.beating < 0.1, 'gliding as it goes by: wings set ' + s.set.toFixed(2) + ', beating ' + s.beating.toFixed(2));
     assert.equal(s.free, true, 'and went back to the other one');
   });
 
@@ -279,9 +284,9 @@ async function flatScreen(browser, base) {
       const blown = d.stage.leaves.material.uniforms.uBlown.value;
       const before = [blown.x, blown.y, blown.z];
       const calm = d.state.wake;
-      // On to a moment when one of them is within 15 m, and a few frames of it.
+      // On to a moment when one of them is within 17 m, and a few frames of it.
       let near = Infinity;
-      for (let t = 0; t < 240 && near > 15; t += 0.25) {
+      for (let t = 0; t < 240 && near > 17; t += 0.25) {
         d.fly(0.25);
         near = Math.min(...d.director.flyers.map((f) => Math.hypot(f.x, f.y - 1.62, f.z)));
       }
@@ -312,7 +317,7 @@ async function flatScreen(browser, base) {
       d.state.paused = false;
       return out;
     });
-    assert.ok(s.near <= 15, 'a dragon came within ' + s.near.toFixed(1) + ' m');
+    assert.ok(s.near <= 17, 'a dragon came within ' + s.near.toFixed(1) + ' m');
     assert.ok(s.wake > 0.5 && s.wake > s.calm + 0.3, 'its wake is felt: ' + s.wake.toFixed(2) + ' (it was ' + s.calm.toFixed(2) + ')');
     assert.ok(s.wind > 0.9, 'the trees by the ledge bend to it: ' + s.wind.toFixed(2));
     assert.ok(s.moved > 0.15, 'and the leaves in the air are carried along: ' + s.moved.toFixed(2) + ' m');
@@ -354,6 +359,45 @@ async function flatScreen(browser, base) {
     assert.equal(s.after, false, 'and it stops when the roar does');
     assert.equal(s.other, false, 'only the one that roared');
     assert.equal(s.heard, 1, 'the roar was heard');
+    assert.deepEqual(problems, []);
+  });
+
+  await check('half a minute into the opening the big dragon glides down over the ledge with its wings set, and the other follows', async () => {
+    const s = await app(page, async () => {
+      const d = window.__dragons;
+      const was = d.state.paused;
+      d.state.paused = true;
+      const best = [{ near: Infinity }, { near: Infinity }];
+      let single = true;
+      for (let t = 24; t <= 35; t += 0.25) {
+        d.seek(t);
+        if (d.director.mode.name !== 'trail') single = false;
+        d.director.flyers.forEach((f, k) => {
+          const near = Math.hypot(f.x, f.y - 1.62, f.z);
+          if (near < best[k].near) best[k] = { near, t, set: f.set, power: f.power, speed: f.speed, x: f.x, y: f.y, z: f.z, heading: f.heading, cupped: d.dragons[k].pose.brake };
+        });
+      }
+      // Leave it there for a frame or two, so that this moment is drawn as well.
+      d.seek(best[0].t);
+      const frame = d.stage.renderer.info.render.frame;
+      await new Promise((resolve) => {
+        const tick = () => (d.stage.renderer.info.render.frame >= frame + 2 ? resolve() : setTimeout(tick, 8));
+        tick();
+      });
+      d.state.paused = was;
+      return { best, single, sizes: d.dragons.map((x) => x.scale) };
+    });
+    const [big, small] = s.best;
+    assert.ok(s.sizes[0] > 1.4 && s.sizes[0] > s.sizes[1], 'the big one is ' + (13.6 * s.sizes[0]).toFixed(1) + ' m across');
+    assert.ok(big.t > 26 && big.t < 32, 'the big one is nearest ' + big.t + ' s in');
+    assert.ok(big.near > 13.5 && big.near < 17, 'at ' + big.near.toFixed(1) + ' m from the viewer\'s head');
+    assert.ok(big.x > 9 && big.y > 8.5, 'to their right and over their head: ' + big.x.toFixed(1) + ' m right, ' + (big.y - 1.62).toFixed(1) + ' m up');
+    assert.ok(Math.cos(big.heading) < -0.8, 'going away over the valley, not coming at them');
+    assert.ok(big.set > 0.9 && big.power < 0.05, 'wings set, not beating: ' + big.set.toFixed(2) + ', ' + big.power.toFixed(2));
+    assert.ok(big.speed < 15, 'slowly: ' + big.speed.toFixed(1) + ' m/s');
+    assert.ok(big.cupped < 0.45, 'and spread nearly flat: cupped ' + big.cupped.toFixed(2));
+    assert.ok(small.t > big.t + 1 && small.near < 20 && small.set > 0.9, 'the other follows ' + (small.t - big.t).toFixed(1) + ' s later, ' + small.near.toFixed(1) + ' m off');
+    assert.equal(s.single, true, 'in single file throughout');
     assert.deepEqual(problems, []);
   });
 

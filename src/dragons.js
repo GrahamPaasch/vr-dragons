@@ -8,7 +8,7 @@
 
 import { THREE, dragonMaterial, flameMaterial } from './shaders.js';
 import { buildDragon, buildFlame, DRAGONS } from './dragonGeometry.js';
-import { BONE, BONE_COUNT, restPose, poseSkeleton, heave } from './rig.js';
+import { BONE, BONE_COUNT, restPose, poseSkeleton, poseFromFlyer, heave } from './rig.js';
 import { ROAR_SECONDS } from './flight.js';
 import * as W from './world.js';
 
@@ -90,17 +90,8 @@ export class DragonView {
    * turn, arch, lookYaw, lookPitch, jaw }. time: seconds.
    */
   update(f, time, dt) {
-    const pose = this.pose;
-    pose.flap = f.flap;
-    pose.power = f.power;
-    pose.tuck = f.tuck;
-    pose.brake = f.brake;
-    pose.turn = f.turn;
-    pose.arch = f.arch;
-    pose.lookYaw = f.lookYaw;
-    pose.lookPitch = f.lookPitch;
-    pose.jaw = f.jaw;
-    pose.time = time + this.scale * 10;
+    // (The small idle movements, tail and neck, run a little more slowly on the bigger animal.)
+    const pose = poseFromFlyer(this.pose, f, (time + this.scale * 10) / Math.sqrt(this.scale));
     poseSkeleton(this.skeleton, pose, this.world, this.skin);
 
     const mesh = this.mesh;

@@ -65,17 +65,19 @@ export function roarReach(distance) {
 
 /**
  * How loud the rush of air round a flying dragon is at the dragon, for a size of 1: more with
- * speed, and much more close to the listener. Beyond 45 m it is only its speed that counts;
- * from there in, the wake itself is heard, up to five times as strong at 12 m. (That is on top
- * of what distance does to every sound: the nearer a dragon comes, the more it is heard, even
- * in a dive with its wings set, when there is no wingbeat to hear.) `beating`: how hard it is
- * beating its wings, 0..1.
+ * speed, and much more close to the listener. Beyond 56 m it is only its speed that counts;
+ * from there in, the wake itself is heard, up to five times as strong at 16 m (which is where
+ * the close passes go by). That is on top of what distance does to every sound: the nearer a
+ * dragon comes, the more it is heard, even gliding with its wings set, when there is no
+ * wingbeat to hear. `beating`: how hard it is beating its wings, 0..1. `cupped`: how far its
+ * wings are held against the air to slow it, 0..1: that is a great deal of air being shoved
+ * aside, and it is heard (the long swoop over the ledge is flown that way, and is all rush).
  */
-export function rushLevel(speed, distance, beating) {
+export function rushLevel(speed, distance, beating, cupped) {
   const rush = clamp((speed - 5) / 16, 0, 1);
-  const close = clamp((45 - distance) / 33, 0, 1);
+  const close = clamp((56 - distance) / 40, 0, 1);
   // While it is beating its wings the beats are what is heard, and the rush stands back.
-  return LEVEL.rush * rush * (1 + 4 * close * close) * (1 - 0.55 * clamp((beating || 0) / 0.6, 0, 1));
+  return LEVEL.rush * rush * (1 + 4 * close * close) * (1 - 0.55 * clamp((beating || 0) / 0.6, 0, 1)) * (1 + 0.9 * clamp(cupped || 0, 0, 1));
 }
 
 /** The slide of a wingbeat's pitch from its start to its end, as steps: 520 Hz down to 190 Hz for the big dragon. */
@@ -368,10 +370,11 @@ class DragonVoice {
   /**
    * Where it is and how it is moving; called every frame. `now`: the audio clock; `beating`:
    * how hard it is beating its wings, 0..1; `place`: false to leave the panner where it is
-   * this time (see PLACE_STEP). What depends on distance and speed is brought up to date every
-   * VOICE_STEP, and only what has moved.
+   * this time (see PLACE_STEP); `cupped`: how far its wings are cupped against the air, 0..1.
+   * What depends on distance and speed is brought up to date every VOICE_STEP, and only what
+   * has moved.
    */
-  move(x, y, z, speed, radial, distance, now, beating, place) {
+  move(x, y, z, speed, radial, distance, now, beating, place, cupped) {
     if (place !== false) placeNow(this.panner, x, y, z);
     this.distance = distance;
     this.doppler = dopplerRatio(radial);
@@ -388,7 +391,7 @@ class DragonVoice {
       this.send = send;
       this.roarSend.gain.setTargetAtTime(send, now, 0.08);
     }
-    const rush = rushLevel(speed, distance, beating) * this.size;
+    const rush = rushLevel(speed, distance, beating, cupped) * this.size;
     if (moved(rush, this.rush, 0.03)) {
       this.rush = rush;
       this.rushGain.gain.setTargetAtTime(rush, now, 0.1);
@@ -1033,7 +1036,7 @@ export class Soundscape {
 
   /**
    * Once a frame. listener: { position: [x, y, z], forward: [x, y, z], up: [x, y, z] } (the
-   * viewer's head). dragons: [{ x, y, z, vx, vy, vz, speed, beating }] in the same order as attach().
+   * viewer's head). dragons: [{ x, y, z, vx, vy, vz, speed, beating, cupped }] in the same order as attach().
    */
   update(dt, listener, dragons) {
     const ctx = this.ctx;
@@ -1073,7 +1076,7 @@ export class Soundscape {
       const rz = d.z - p[2];
       const distance = Math.hypot(rx, ry, rz) || 1;
       const radial = (rx * d.vx + ry * d.vy + rz * d.vz) / distance;
-      this.dragons[i].move(d.x, d.y, d.z, d.speed, radial, distance, now, d.beating, place);
+      this.dragons[i].move(d.x, d.y, d.z, d.speed, radial, distance, now, d.beating, place, d.cupped);
       if (distance < nearest) nearest = distance;
     }
     this.nearest = nearest;

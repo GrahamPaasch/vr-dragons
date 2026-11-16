@@ -77,7 +77,8 @@ test('at rest nothing moves: the rest pose leaves every vertex where it was mode
     skinPoint(skin, bone, p, q);
     assert.ok(Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 0.2, 'the body barely moves at rest');
   }
-  // The rest pose is a glide: wings out to both sides, about 13.6 m from tip to tip for the big one.
+  // The rest pose is a glide: wings out to both sides and a little raised, 19 m and more from
+  // tip to tip for the big one (19.7 m with the wings flat out: the span of a small airliner).
   const v = posed(built, restPose());
   let minX = Infinity;
   let maxX = -Infinity;
@@ -89,9 +90,18 @@ test('at rest nothing moves: the rest pose leaves every vertex where it was mode
     minZ = Math.min(minZ, v[i + 2]);
     maxZ = Math.max(maxZ, v[i + 2]);
   }
-  assert.ok(maxX - minX > 12 && maxX - minX < 15, 'wingspan ' + (maxX - minX).toFixed(1) + ' m');
+  assert.ok(maxX - minX > 18.5 && maxX - minX < 20.5, 'wingspan ' + (maxX - minX).toFixed(1) + ' m');
   assert.ok(Math.abs(maxX + minX) < 0.2, 'the same on both sides');
-  assert.ok(maxZ - minZ > 11 && maxZ - minZ < 16, 'nose to tail ' + (maxZ - minZ).toFixed(1) + ' m');
+  assert.ok(maxZ - minZ > 17 && maxZ - minZ < 23, 'nose to tail ' + (maxZ - minZ).toFixed(1) + ' m');
+  // The smaller one is still a big animal: 15 m across.
+  const small = posed(buildDragon(DRAGONS[1].build, colours(DRAGONS[1])), restPose());
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < small.length; i += 3) {
+    lo = Math.min(lo, small[i]);
+    hi = Math.max(hi, small[i]);
+  }
+  assert.ok(hi - lo > 14 && hi - lo < 17, 'the smaller one: ' + (hi - lo).toFixed(1) + ' m');
 });
 
 test('a wingbeat: tips high at the top, low at the bottom, folded on the way up, and both wings alike', () => {
@@ -107,8 +117,8 @@ test('a wingbeat: tips high at the top, low at the bottom, folded on the way up,
   };
   const top = tip(0, 1);
   const bottom = tip(Math.PI, 1);
-  assert.ok(top[1] > 3, 'tip at the top of the stroke: ' + top[1].toFixed(1) + ' m up');
-  assert.ok(bottom[1] < -1.5, 'tip at the bottom: ' + bottom[1].toFixed(1) + ' m');
+  assert.ok(top[1] > 4.5, 'tip at the top of the stroke: ' + top[1].toFixed(1) + ' m up');
+  assert.ok(bottom[1] < -2.2, 'tip at the bottom: ' + bottom[1].toFixed(1) + ' m');
   // Left and right mirror each other at every point of the beat.
   for (let flap = 0; flap < 6.3; flap += 0.4) {
     const l = tip(flap, 1);
@@ -118,7 +128,7 @@ test('a wingbeat: tips high at the top, low at the bottom, folded on the way up,
   // The wing reaches further out going down than coming up (it folds on the upstroke).
   const down = tip(Math.PI / 2, 1);
   const up = tip((3 * Math.PI) / 2, 1);
-  assert.ok(Math.hypot(down[0], down[2]) > Math.hypot(up[0], up[2]) + 0.8, 'spread ' + down[0].toFixed(1) + ' m against ' + up[0].toFixed(1) + ' m folded');
+  assert.ok(Math.hypot(down[0], down[2]) > Math.hypot(up[0], up[2]) + 1.2, 'spread ' + down[0].toFixed(1) + ' m against ' + up[0].toFixed(1) + ' m folded');
   // The body rides up and down a little with the beat.
   let lo = Infinity;
   let hi = -Infinity;
@@ -162,18 +172,20 @@ test('the skeleton: 24 bones, parents before children, and the head turns to loo
   assert.equal(BONE_COUNT, 24);
   const world = new Float32Array(BONE_COUNT * 12);
   const skin = new Float32Array(BONE_COUNT * 12);
-  const nose = [0, 0.25 + 0.4, 1.7 + 4.05];
+  // (Places on the animal are given for a dragon of size 1, and grow with it.)
+  const k = sk.build.scale;
+  const nose = [0, (0.25 + 0.4) * k, (1.7 + 4.05) * k];
   const at = (pose) => skinPoint(poseSkeleton(sk, Object.assign(restPose(), pose), world, skin), BONE.head, nose, [0, 0, 0]);
   const ahead = at({});
   const left = at({ lookYaw: 1 });
   const up = at({ lookPitch: 0.6 });
-  assert.ok(left[0] > ahead[0] + 1, 'looking left moves the nose to its left (+x): ' + left[0].toFixed(2));
-  assert.ok(up[1] > ahead[1] + 0.5, 'looking up lifts it: ' + up[1].toFixed(2));
+  assert.ok(left[0] > ahead[0] + 1 * k, 'looking left moves the nose to its left (+x): ' + left[0].toFixed(2));
+  assert.ok(up[1] > ahead[1] + 0.5 * k, 'looking up lifts it: ' + up[1].toFixed(2));
   // The jaw drops when it opens.
-  const chin = [0, 0.3, 1.7 + 3.9];
+  const chin = [0, 0.3 * k, (1.7 + 3.9) * k];
   const shut = skinPoint(poseSkeleton(sk, restPose(), world, skin), BONE.jaw, chin, [0, 0, 0]);
   const open = skinPoint(poseSkeleton(sk, Object.assign(restPose(), { jaw: 1 }), world, skin), BONE.jaw, chin, [0, 0, 0]);
-  assert.ok(open[1] < shut[1] - 0.3, 'the chin drops ' + (shut[1] - open[1]).toFixed(2) + ' m');
+  assert.ok(open[1] < shut[1] - 0.3 * k, 'the chin drops ' + (shut[1] - open[1]).toFixed(2) + ' m');
 });
 
 test('fire: a spray of tongues from the mouth, pointing the way the snout does', () => {

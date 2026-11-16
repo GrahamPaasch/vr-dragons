@@ -191,7 +191,7 @@ test('a session that could not keep up makes the next one cheaper in pixels, a s
 test('the rush of a dragon grows as it comes close, and stands back while it beats its wings', () => {
   assert.equal(A.rushLevel(4, 20), 0, 'none when it is hardly moving');
   assert.ok(A.rushLevel(16, 15) > 3 * A.rushLevel(16, 80), 'at 15 m ' + A.rushLevel(16, 15).toFixed(2) + ', at 80 m ' + A.rushLevel(16, 80).toFixed(2));
-  assert.equal(A.rushLevel(16, 80), A.rushLevel(16, 300), 'beyond 45 m only its speed counts');
+  assert.equal(A.rushLevel(16, 80), A.rushLevel(16, 300), 'beyond 56 m only its speed counts');
   assert.ok(A.rushLevel(25, 15) > A.rushLevel(15, 15), 'faster is louder');
   let last = 0;
   for (const d of [60, 40, 30, 20, 12]) {
@@ -201,4 +201,8 @@ test('the rush of a dragon grows as it comes close, and stands back while it bea
   }
   assert.ok(A.rushLevel(16, 15, 0.6) < 0.5 * A.rushLevel(16, 15, 0), 'behind the wingbeats');
   assert.ok(A.rushLevel(16, 15, 0.6) > 0, 'but not gone');
+  // Gliding by with its wings set and cupped (the swoop over the ledge) there is no wingbeat
+  // at all: the air it shoves aside is what is heard, and it is heard well.
+  assert.ok(A.rushLevel(12.5, 15, 0, 0.5) > 1.3 * A.rushLevel(12.5, 15, 0, 0), 'cupped wings are louder');
+  assert.ok(A.rushLevel(12.5, 15, 0, 0.5) > A.rushLevel(16, 15, 0.6), 'a glide past at 15 m is heard as well as a beating pass');
 });

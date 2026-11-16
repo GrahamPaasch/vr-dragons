@@ -259,8 +259,9 @@ export function forestDensity(x, z) {
   // further back, which also leaves room for a dragon to come in low over the viewer's shoulder.
   f *= smoothstep(z > 0 ? 27 : 8, z > 0 ? 34 : 13, r);
   // Behind the viewer's right shoulder the plateau is a bare shelf of rock with a few trees
-  // (HERO_TREES): that is the way a dragon comes over.
-  if (z > 0 && x > -4) f *= Math.max(smoothstep(58, 68, r), 1 - smoothstep(-4, 4, x));
+  // (HERO_TREES): that is the way a dragon comes over. (It was a narrower shelf while the
+  // dragons were smaller: a wingspan of twenty metres wants a gate to match.)
+  if (z > 0 && x > -13) f *= Math.max(smoothstep(58, 68, r), 1 - smoothstep(-13, -5, x));
   // The cliff and the fallen rock under it are bare; trees begin lower down the slope.
   const front = bluffFront(x, z);
   if (front > -1.5) f *= smoothstep(44, 56, front);
@@ -279,18 +280,20 @@ export function forestDensity(x, z) {
 /**
  * The trees that stand close to the ledge, placed by hand: [x, z, height, crown radius, kind].
  * The big maple leans over the viewer's left shoulder and sheds the leaves that drift past; the
- * right side is kept open, because that is where a dragon comes over. In particular nothing
- * stands within 13 m of the line 11 m to the viewer's right, from the rim to 30 m back: a
- * dragon that is called goes by along it, low enough to be watched all the way (flight.js,
- * planPass).
+ * right side is kept open, because that is where a dragon comes over. In particular no trunk
+ * stands within 15 m of the line 13 m to the viewer's right, from the rim to 34 m back, and no
+ * crown reaches within 10 m of it: a dragon that is called goes by along it, low enough to be
+ * watched all the way (flight.js, planPass), and the long swoop of the opening comes down it
+ * the other way. (The pine and the first birch stood four metres nearer to that line while
+ * the dragons were smaller.)
  */
 export const HERO_TREES = [
   { x: -7.5, z: 5.5, height: 15, radius: 5.6, kind: 'maple' },
-  { x: 25, z: 25, height: 11, radius: 3, kind: 'birch' },
+  { x: 29, z: 27, height: 11, radius: 3, kind: 'birch' },
   { x: -16.5, z: 13, height: 14, radius: 6, kind: 'oak' },
-  { x: 27, z: 9, height: 19, radius: 3.4, kind: 'pine' },
+  { x: 31, z: 9, height: 19, radius: 3.4, kind: 'pine' },
   { x: -3, z: 19, height: 13, radius: 5, kind: 'maple2' },
-  { x: 4, z: 28, height: 12, radius: 4.6, kind: 'oak2' },
+  { x: -2, z: 32, height: 12, radius: 4.6, kind: 'oak2' },
   { x: -24, z: 4, height: 10, radius: 3, kind: 'birch2' },
 ];
 

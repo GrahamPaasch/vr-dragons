@@ -316,8 +316,11 @@ export function buildFlame(build) {
 export const DRAGONS = [
   {
     name: 'Ember',
-    build: { scale: 1, neck: 1, tail: 1, wing: 1, bulk: 1, horn: 1 },
-    beat: 1.0, // wingbeats a second at an easy pace
+    // 19.7 m from wingtip to wingtip: the span of a small airliner. (It was 13.6 m; seen in a
+    // headset from 25 m that was a big bird, and this is a dragon.)
+    build: { scale: 1.45, neck: 1, tail: 1, wing: 1, bulk: 1, horn: 1 },
+    beat: 0.72, // wingbeats a second at an easy pace: wings this long are not beaten fast
+    voice: 1.16, // how big it sounds (the sound was balanced for 1 and 0.78)
     colors: {
       back: [0.56, 0.1, 0.06],
       side: [0.74, 0.18, 0.07],
@@ -331,8 +334,9 @@ export const DRAGONS = [
   },
   {
     name: 'Tarn',
-    build: { scale: 0.78, neck: 1.08, tail: 1.12, wing: 1.06, bulk: 0.9, horn: 1.25 },
-    beat: 1.28,
+    build: { scale: 1.1, neck: 1.08, tail: 1.12, wing: 1.06, bulk: 0.9, horn: 1.25 },
+    beat: 0.94,
+    voice: 0.88,
     // Its upper side is a light teal on purpose: a dark one sat at the value of shaded forest,
     // and beyond a hundred metres it was lost against the hillsides.
     colors: {

@@ -4,11 +4,28 @@ import * as W from '../src/world.js';
 import * as F from '../src/flight.js';
 import { buildTerrain } from '../src/terrain.js';
 import { DRAGONS } from '../src/dragonGeometry.js';
+import { BONE_COUNT, makeSkeleton, restPose, poseFromFlyer, wingReach } from '../src/rig.js';
 import { makeRng } from '../src/rng.js';
 
 const DEG = Math.PI / 180;
 const builds = DRAGONS.map((d) => ({ beat: d.beat, size: d.build.scale }));
 const head = (f) => Math.hypot(f.x - F.VIEWER[0], f.y - F.VIEWER[1], f.z - F.VIEWER[2]);
+
+/**
+ * How near a dragon's wingtips are to the viewer's head just now (metres), with the wings
+ * where the picture has them. Only worked out when the body is close: it costs a skeleton.
+ */
+const skeletons = DRAGONS.map((d) => makeSkeleton(d.build));
+const poses = [restPose(), restPose()];
+const boneWorld = new Float32Array(BONE_COUNT * 12);
+const boneSkin = new Float32Array(BONE_COUNT * 12);
+function wingtips(d, i) {
+  const f = d.flyers[i];
+  if (head(f) > 36) return Infinity;
+  return wingReach(skeletons[i], poseFromFlyer(poses[i], f, d.time), f, F.VIEWER, boneWorld, boneSkin);
+}
+/** No wingtip comes nearer to the viewer's head than this (metres). */
+const WING_CLEAR = 5.5;
 
 test('the flight floor: over water, over bare ground, over forest, and the dome round the viewer', () => {
   // Low over the middle of the lake.
@@ -26,6 +43,10 @@ test('the flight floor: over water, over bare ground, over forest, and the dome 
     const y = F.flightFloor(x, z);
     assert.ok(Math.hypot(x, y - F.VIEWER[1], z) >= F.KEEP_OUT, 'the floor at ' + x + ', ' + z + ' is outside the keep-out');
   }
+  // And a body that is beside the viewer, outside that, is well above their head: its wing
+  // (ten metres of it) goes over them, not at them. Further out the floor lets go.
+  for (const [x, z] of [[11.5, 0], [0, -12.5], [-9, -9], [8, -9]]) assert.ok(F.flightFloor(x, z) >= F.VIEWER[1] + 5, 'beside the viewer at ' + x + ', ' + z + ': ' + F.flightFloor(x, z).toFixed(1));
+  assert.ok(F.flightFloor(0, -18) < F.VIEWER[1], 'eighteen metres out in front the air is open down to the cliff');
   // Over each tree by the ledge, and for a wing's length round it; the big trees by the creek too.
   for (const t of [...W.HERO_TREES, ...W.GROVE]) {
     assert.ok(F.flightFloor(t.x, t.z) >= t.height + 3 - 1e-9, 'over the ' + t.kind);
@@ -195,28 +216,75 @@ test('the same seed flies the same flight; another seed a different one', () => 
   assert.notDeepEqual(run(7), run(8));
 });
 
-test('the opening: in from the far end of the lake, the figure of eight in front of the ledge, then through the big trees', () => {
+test('the opening: in out of the sunset, round behind the ledge, and the long swoop over the viewer with wings set', () => {
   const d = new F.Director(builds, 99);
-  assert.deepEqual(d.program().slice(0, 2), ['far turn', 'eight']);
+  assert.deepEqual(d.program().slice(0, 2), ['far turn', 'sweep']);
   const flown = [];
   const again = new F.Director(builds, 99);
-  for (let i = 0; i < 72 * 70; i++) {
+  for (let i = 0; i < 72 * 116; i++) {
     again.step(1 / 72);
     const name = again.find(again.center).lane.name;
     if (flown[flown.length - 1] !== name) flown.push(name);
   }
-  assert.deepEqual(flown, ['far turn', 'eight', 'turn', 'narrows'], 'the first minute and a bit');
+  assert.deepEqual(flown, ['far turn', 'sweep', 'turn', 'eight', 'stoop', 'rise'], 'the first two minutes');
   assert.ok(d.flyers.every((f) => head(f) > 150 && f.z < -150), 'they start far out over the lake');
-  let firstNear = 0;
-  let nearest = Infinity;
+  // They come in out of the sun: seen from the ledge they start within a hand's breadth of it.
+  for (const f of d.flyers) {
+    const to = [f.x - F.VIEWER[0], f.y - F.VIEWER[1], f.z - F.VIEWER[2]];
+    const off = Math.acos((to[0] * W.SUN_DIR[0] + to[1] * W.SUN_DIR[1] + to[2] * W.SUN_DIR[2]) / Math.hypot(to[0], to[1], to[2])) / DEG;
+    assert.ok(off < 16, 'a dragon starts ' + off.toFixed(0) + ' degrees from the sun');
+  }
+  // The swoop. It is staged, so it is the same whatever the seed: the big one first, then the
+  // other, each for four seconds within 30 m, from behind the viewer and away over the valley.
+  const within = [{ from: 0, to: 0, near: Infinity, at: 0, power: 0, fast: 0, slow: Infinity, tip: Infinity, z0: 0, z1: 0 }, null];
+  within[1] = Object.assign({}, within[0]);
+  let crossed = Infinity;
   for (let i = 0; i < 72 * 45; i++) {
     d.step(1 / 72);
-    const n = Math.min(head(d.flyers[0]), head(d.flyers[1]));
-    nearest = Math.min(nearest, n);
-    if (!firstNear && n < 45) firstNear = d.time;
+    assert.equal(d.mode.name, 'trail', 'in single file all the way to the swoop (at ' + d.time.toFixed(1) + ' s)');
+    d.flyers.forEach((f, k) => {
+      const r = head(f);
+      const w = within[k];
+      if (r < 30) {
+        if (!w.from) {
+          w.from = d.time;
+          w.z0 = f.z;
+        }
+        w.to = d.time;
+        w.z1 = f.z;
+        w.power = Math.max(w.power, f.power);
+        w.fast = Math.max(w.fast, f.speed);
+        w.slow = Math.min(w.slow, f.speed);
+        w.tip = Math.min(w.tip, wingtips(d, k));
+        if (r < w.near) {
+          w.near = r;
+          w.at = d.time;
+        }
+      }
+      // Afterwards the big one crosses the sun's disc, as the viewer sees it.
+      if (k === 0 && d.time > w.to + 1 && w.to > 0 && r > 40 && r < 90) {
+        const to = [f.x - F.VIEWER[0], f.y - F.VIEWER[1], f.z - F.VIEWER[2]];
+        crossed = Math.min(crossed, Math.acos((to[0] * W.SUN_DIR[0] + to[1] * W.SUN_DIR[1] + to[2] * W.SUN_DIR[2]) / r) / DEG);
+      }
+    });
   }
-  assert.ok(firstNear > 5 && firstNear < 25, 'within 45 m of the viewer ' + firstNear.toFixed(1) + ' s in');
-  assert.ok(nearest < 35 && nearest > 12, 'nearest in the opening: ' + nearest.toFixed(1) + ' m');
+  const [big, small] = within;
+  assert.ok(big.at > 24 && big.at < 34, 'the big one is nearest ' + big.at.toFixed(1) + ' s in');
+  assert.ok(big.near > 13.5 && big.near < 17, 'at ' + big.near.toFixed(1) + ' m from the viewer\'s head');
+  assert.ok(small.at > big.at + 1.5 && small.at < big.at + 5, 'and the other follows ' + (small.at - big.at).toFixed(1) + ' s behind');
+  assert.ok(small.near > 13.5 && small.near < 20, 'at ' + small.near.toFixed(1) + ' m');
+  for (const [name, w] of [['the big one', big], ['the other', small]]) {
+    // Slow, and with its wings set: nothing beats near the viewer's head.
+    assert.ok(w.to - w.from > 3.2, name + ' is within 30 m for ' + (w.to - w.from).toFixed(1) + ' s');
+    assert.ok(w.fast < 15, name + ' goes by at no more than ' + w.fast.toFixed(1) + ' m/s');
+    assert.ok(w.slow > 10, name + ' is never slower than ' + w.slow.toFixed(1) + ' m/s');
+    assert.ok(w.power < 0.05, name + ' has its wings set: beating at ' + w.power.toFixed(2));
+    // From behind the viewer, and away in front of them: it is never flying at their face.
+    assert.ok(w.z0 > 12 && w.z1 < -12, name + ' comes from behind (z ' + w.z0.toFixed(0) + ') and leaves ahead (z ' + w.z1.toFixed(0) + ')');
+  }
+  // The big one's wing goes over the viewer's head, well clear of it.
+  assert.ok(big.tip > 7 && big.tip < 12, 'the big one\'s wingtip passes ' + big.tip.toFixed(1) + ' m from the viewer\'s head');
+  assert.ok(crossed < 3.5, 'and then it crosses the sun, ' + crossed.toFixed(1) + ' degrees from the middle of the disc');
 });
 
 for (const seed of [20261115, 3, 11]) {
@@ -234,6 +302,10 @@ for (const seed of [20261115, 3, 11]) {
     let glide = 0;
     let beats = 0;
     let roars = 0;
+    let minTip = Infinity;
+    let flips = 0;
+    let hard = 0;
+    const side = [0, 0];
     const lanes = new Set();
     const modes = new Set();
     const steps = 72 * 60 * 20;
@@ -256,6 +328,16 @@ for (const seed of [20261115, 3, 11]) {
         assert.ok(f.speed >= 9 && f.speed <= 38, 'speed ' + f.speed);
         assert.ok(Math.abs(f.bank) <= 59 * DEG, 'bank ' + f.bank / DEG);
         assert.ok(Number.isFinite(f.x + f.y + f.z + f.heading + f.gamma), 'finite');
+        minTip = Math.min(minTip, wingtips(d, d.flyers.indexOf(f)));
+        // How restless it is: how often it rolls from one wing to the other, and how much of
+        // the time it is banked hard.
+        const k = d.flyers.indexOf(f);
+        const lean = f.bank > 20 * DEG ? 1 : f.bank < -20 * DEG ? -1 : 0;
+        if (lean && lean !== side[k]) {
+          if (side[k]) flips++;
+          side[k] = lean;
+        }
+        if (Math.abs(f.bank) > 50 * DEG) hard += dt / 2;
         if (v < 40) {
           near += dt / 2;
           nearNow = true;
@@ -269,7 +351,12 @@ for (const seed of [20261115, 3, 11]) {
     const total = steps * dt;
     assert.ok(minViewer >= F.KEEP_OUT, 'nearest to the viewer ' + minViewer.toFixed(1) + ' m');
     assert.ok(minViewer < 16, 'and they do come close: ' + minViewer.toFixed(1) + ' m');
-    assert.ok(minSep > 5, 'nearest to each other ' + minSep.toFixed(1) + ' m');
+    assert.ok(minTip >= WING_CLEAR, 'the nearest a wingtip comes to the viewer\'s head: ' + minTip.toFixed(1) + ' m');
+    assert.ok(minSep > 9, 'nearest to each other ' + minSep.toFixed(1) + ' m');
+    // Weight: they do not dart. (The first pair rolled from wing to wing eight times a minute
+    // each and spent an eighth of the time banked beyond 50 degrees.)
+    assert.ok(flips / 2 / 20 < 6, 'each rolls from one wing to the other ' + (flips / 2 / 20).toFixed(1) + ' times a minute');
+    assert.ok(hard / total < 0.05, 'banked beyond 50 degrees ' + ((100 * hard) / total).toFixed(1) + '% of the time');
     assert.ok(minGround > 2, 'lowest over ground or water ' + minGround.toFixed(1) + ' m');
     assert.ok(deepest < 4.5, 'deepest under the flight floor ' + deepest.toFixed(1) + ' m');
     assert.equal(d.flyers[0].floorHits + d.flyers[1].floorHits, 0, 'no emergency pull-ups');
@@ -277,7 +364,7 @@ for (const seed of [20261115, 3, 11]) {
     assert.ok(near / total > 0.03, 'time within 40 m: ' + ((100 * near) / total).toFixed(1) + '%');
     assert.ok(forward / total > 0.45, 'time in the forward view: ' + ((100 * forward) / total).toFixed(0) + '%');
     assert.ok(glide / total > 0.2 && glide / total < 0.7, 'they glide as well as beat: ' + ((100 * glide) / total).toFixed(0) + '%');
-    assert.ok(beats > 800, 'wingbeats: ' + beats);
+    assert.ok(beats > 700, 'wingbeats: ' + beats);
     assert.ok(roars >= 8 && roars <= 40, 'a roar now and then: ' + roars);
     assert.ok(lanes.size >= 9, 'lanes flown: ' + [...lanes].join(', '));
     assert.ok(modes.size >= 5, 'ways of flying together: ' + [...modes].join(', '));
@@ -314,35 +401,47 @@ test('pacing: the first six minutes of a visit have no minute with both dragons 
   assert.ok(far130 / total < 0.42, 'the nearer one is beyond 130 m ' + ((100 * far130) / total).toFixed(0) + '% of the time');
 });
 
-test('close to the viewer the two fly figures, and beat their wings', () => {
+test('close to the viewer the two fly figures; further off they beat their wings, and right by the ledge they glide', () => {
   const dt = 1 / 72;
   let close = 0;
   let file = 0;
-  let within = 0;
+  let mid = 0;
   let beating = 0;
+  let near = 0;
+  let hard = 0;
   for (const seed of [5, 6]) {
     const d = new F.Director(builds, seed);
     for (let n = 0; n < 72 * 60 * 20; n++) {
       d.step(dt);
       d.drain();
       const h = [head(d.flyers[0]), head(d.flyers[1])];
-      if (Math.min(h[0], h[1]) < 40) {
+      // (The staged swoop of the opening is flown in single file on purpose: not counted.)
+      if (Math.min(h[0], h[1]) < 40 && d.center > d.fileUntil) {
         close++;
         if (d.mode.name === 'trail') file++;
       }
       for (let i = 0; i < 2; i++) {
-        if (h[i] > 20) continue;
-        within++;
-        if (d.flyers[i].power > 0.2) beating++;
+        if (h[i] > 25 && h[i] < 70) {
+          mid++;
+          if (d.flyers[i].power > 0.2) beating++;
+        }
+        if (h[i] < 17) {
+          near++;
+          if (d.flyers[i].power > 0.5) hard++;
+        }
       }
     }
   }
   assert.ok(close > 72 * 60, 'they are close for more than a minute in forty');
   // One behind the other is for the tight places; in the open in front of the ledge they
   // fly side by side, one above the other, or round each other.
-  assert.ok(file / close < 0.45, 'in single file ' + ((100 * file) / close).toFixed(0) + '% of the time they are within 40 m');
-  // A big animal flying slowly has to work at it: inside 20 m they are mostly beating.
-  assert.ok(beating / within > 0.4, 'beating ' + ((100 * beating) / within).toFixed(0) + '% of the time inside 20 m');
+  assert.ok(file / close < 0.5, 'in single file ' + ((100 * file) / close).toFixed(0) + '% of the time they are within 40 m');
+  // A big animal flying slowly has to work at it: out in front of the ledge they are mostly beating.
+  assert.ok(beating / mid > 0.6, 'beating ' + ((100 * beating) / mid).toFixed(0) + '% of the time between 25 and 70 m');
+  // But the passes right by the viewer are glides: over the ledge the wings are set, or it is
+  // a dive. Inside 17 m a full downstroke is rare.
+  assert.ok(near > 72 * 10, 'they are within 17 m for ' + (near / 72).toFixed(0) + ' s in forty minutes');
+  assert.ok(hard / near < 0.25, 'beating hard ' + ((100 * hard) / near).toFixed(0) + '% of the time inside 17 m');
 });
 
 test('calling: a dragon answers, comes, passes close where it can be watched, roars, and goes back', () => {
@@ -357,6 +456,9 @@ test('calling: a dragon answers, comes, passes close where it can be watched, ro
     let answers = 0;
     let refusals = 0;
     let minViewer = Infinity;
+    let minTip = Infinity;
+    let glides = 0;
+    let beats = 0;
     const nearest = [];
     const up = [];
     const waits = [];
@@ -393,6 +495,12 @@ test('calling: a dragon answers, comes, passes close where it can be watched, ro
         const f = d.flyers[i];
         const v = head(f);
         minViewer = Math.min(minViewer, v);
+        minTip = Math.min(minTip, wingtips(d, i));
+        // What goes by the viewer is a wing held still, not a downstroke.
+        if (d.jobs[i] && d.jobs[i].phase !== 'out' && v < 22) {
+          if (f.power > 0.2) beats++;
+          else glides++;
+        }
         // (Counted once it is coming: one that is called while it happens to be close goes out first.)
         if (d.jobs[i] && d.jobs[i].phase !== 'out') {
           if (v < best[i]) {
@@ -413,16 +521,19 @@ test('calling: a dragon answers, comes, passes close where it can be watched, ro
     // Low enough to be watched as it goes by, high enough to go over the rim: nine in ten
     // between 18 and 40 degrees above eye level, none overhead.
     assert.ok(up[Math.floor(up.length * 0.05)] > 18 && up[Math.floor(up.length * 0.95)] < 40, 'how high they pass: ' + up.map((a) => a.toFixed(0)).join(' '));
-    assert.ok(up[up.length - 1] < 60, 'the highest: ' + up[up.length - 1].toFixed(0) + ' degrees');
-    assert.ok(waits[waits.length >> 1] < 14.5, 'from call to pass: ' + waits[waits.length >> 1].toFixed(1) + ' s for half of them');
+    assert.ok(up[up.length - 1] < 50, 'the highest: ' + up[up.length - 1].toFixed(0) + ' degrees');
+    // (An animal this size does not whip round: a quarter of a minute is the price of that.)
+    assert.ok(waits[waits.length >> 1] < 16, 'from call to pass: ' + waits[waits.length >> 1].toFixed(1) + ' s for half of them');
     assert.ok(waits[waits.length - 1] < 28, 'and never longer than ' + waits[waits.length - 1].toFixed(1) + ' s');
     assert.ok(made >= 30, 'calls answered: ' + made);
     assert.ok(passes >= made - 1, 'every one came past: ' + passes + ' of ' + made);
     assert.ok(callRoars >= made - 1, 'and roared on the way in: ' + callRoars);
     assert.ok(minViewer >= F.KEEP_OUT, 'never nearer than ' + F.KEEP_OUT + ' m: ' + minViewer.toFixed(1));
+    assert.ok(minTip >= WING_CLEAR, 'and no wingtip nearer to the viewer\'s head than ' + minTip.toFixed(1) + ' m');
+    assert.ok(beats / (beats + glides) < 0.06, 'they go by gliding: beating ' + ((100 * beats) / (beats + glides)).toFixed(0) + '% of the time within 22 m');
     nearest.sort((a, b) => a - b);
     const median = nearest[nearest.length >> 1];
-    assert.ok(median < 14, 'half of them pass within ' + median.toFixed(1) + ' m');
+    assert.ok(median < 16, 'half of them pass within ' + median.toFixed(1) + ' m');
     assert.ok(nearest[nearest.length - 1] < 20, 'and the widest at ' + nearest[nearest.length - 1].toFixed(1) + ' m');
     assert.ok(!d.jobs[0] || !d.jobs[1], 'the two are never both away');
     assert.equal(d.flyers[0].floorHits + d.flyers[1].floorHits, 0, 'no emergency pull-ups');
@@ -435,7 +546,7 @@ test('a called pass is planned clear of the trees by the ledge, and where it can
     const a = deg * DEG;
     const ux = -Math.sin(a);
     const uz = Math.cos(a);
-    for (const size of [1, 0.78]) {
+    for (const size of builds.map((b) => b.size)) {
       const plan = F.planPass(ux, uz, size);
       const p = plan.point;
       assert.ok(plan.near >= F.KEEP_OUT + 1.5, 'from ' + deg + ' degrees: ' + plan.near.toFixed(1) + ' m from the head');
@@ -445,15 +556,16 @@ test('a called pass is planned clear of the trees by the ledge, and where it can
     }
   }
   // The lines a called dragon really comes in along, over the near end of the lake: it goes by
-  // on the viewer's right, a wing's length off, and low enough to be watched all the way.
+  // on the viewer's right, a wing's length and a half off (its wing over their head), and low
+  // enough to be watched all the way.
   assert.ok(F.CALL_LINES.length >= 3);
   for (const from of F.CALL_LINES) {
     assert.ok(Math.abs(from) < 20 * DEG, 'in from over the lake');
-    for (const size of [1, 0.78]) {
+    for (const size of builds.map((b) => b.size)) {
       const plan = F.planPass(-Math.sin(from), Math.cos(from), size);
       const where = 'coming from ' + (from / DEG).toFixed(0) + ' degrees: ';
-      assert.ok(plan.point[0] > 8, where + 'on the right, ' + plan.point[0].toFixed(1) + ' m out');
-      assert.ok(plan.near > 10.6 && plan.near < 14, where + plan.near.toFixed(1) + ' m from the head');
+      assert.ok(plan.point[0] > 11, where + 'on the right, ' + plan.point[0].toFixed(1) + ' m out');
+      assert.ok(plan.near > 13.4 && plan.near < 16.5, where + plan.near.toFixed(1) + ' m from the head');
       assert.ok(plan.elevation > 20 * DEG && plan.elevation < 34 * DEG, where + (plan.elevation / DEG).toFixed(0) + ' degrees up');
       assert.ok(plan.point[1] - F.VIEWER[1] >= 4, where + (plan.point[1] - F.VIEWER[1]).toFixed(1) + ' m above the head');
     }
