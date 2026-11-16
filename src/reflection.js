@@ -24,8 +24,15 @@ export function reflectionBounds() {
   return { x0: LAKE.cx - ex, x1: LAKE.cx + ex, z0: LAKE.cz - ez, z1: LAKE.cz + ez };
 }
 
-const DEEP = [0.012, 0.04, 0.055]; // looking down into the water
+const DEEP = [0.014, 0.018, 0.05]; // looking down into the water: ink, at this hour
 const SHALLOW = [0.1, 0.08, 0.065];
+/**
+ * How much of a mirror the lake is: this much looking straight down into it, and all of one
+ * at a glancing angle. (Water under a midday sky is a fifth of that, and one sees into it.
+ * Under a sky that is on fire, with the land gone dark, the lake is the sky lying on the
+ * ground: that is what is drawn.)
+ */
+const MIRROR_LEAST = 0.4;
 /** A mirrored ray that clears the land by less than this (radians) still sees some of it: the soft outline of the hills. */
 const EDGE = 0.045;
 /** How much of the sky's glow the haze in front of a far hill takes on, toward the sun. */
@@ -109,7 +116,7 @@ export function bakeReflection(size, heights, far, sunHeight, eye) {
         lightOn(nx, ny, nz, lit, light);
         if (forest) {
           canopyColor(hx, hz, hash2(Math.floor(hx / 11), Math.floor(hz / 11)), albedo);
-          const through = Math.max(-(nx * SUN_DIR[0] + ny * SUN_DIR[1] + nz * SUN_DIR[2]), 0) * 0.55 * lit;
+          const through = Math.max(-(nx * SUN_DIR[0] + ny * SUN_DIR[1] + nz * SUN_DIR[2]), 0) * 0.45 * lit;
           for (let q = 0; q < 3; q++) c[q] = albedo[q] * (light[q] + LIGHT.sun[q] * through) * 0.8;
         } else {
           groundColor(hx, hz, hy, 0.4, albedo);
@@ -132,7 +139,7 @@ export function bakeReflection(size, heights, far, sunHeight, eye) {
       }
       // Water mirrors more at a glancing angle; looking down you see into it.
       const cosI = Math.abs(dy);
-      const mirror = 0.1 + 0.9 * Math.pow(1 - cosI, 2.6);
+      const mirror = MIRROR_LEAST + (1 - MIRROR_LEAST) * Math.pow(1 - cosI, 2);
       const dl = lakeDistance(x, z);
       const shore = smoothstep(-4, 0, dl) * 0.42;
       for (let q = 0; q < 3; q++) {
@@ -140,12 +147,16 @@ export function bakeReflection(size, heights, far, sunHeight, eye) {
         c[q] = lerp(c[q], SHALLOW[q], shore);
       }
       toDisplay(c);
-      // The sun's path on the water: narrow sideways, long toward the viewer.
+      // The sun's path on the water: a road of light from under the sun toward the viewer,
+      // narrow far off and wider as it comes (the nearer the water, the steeper it is seen,
+      // and the more of its ripples are tilted the right way to throw the sun at the eye),
+      // fading as it nears the foot of the bluff.
       const flat = Math.hypot(dx, dz) || 1;
       const cosAz = (dx * SUN_DIR[0] + dz * SUN_DIR[2]) / (flat * sunFlat);
       const az = Math.acos(Math.min(Math.max(cosAz, -1), 1));
       const el = Math.asin(ry) - SUN_ELEVATION;
-      let glitter = Math.exp(-(az * az) / (0.095 * 0.095)) * Math.exp(-(el * el) / (0.24 * 0.24));
+      const wide = 0.05 + 0.11 * ry;
+      let glitter = Math.exp(-(az * az) / (wide * wide)) * Math.exp(-(el * el) / (0.5 * 0.5));
       glitter *= sunlitAt(sunHeight, x, LAKE_LEVEL + 0.5, z, 2) * (1 - shore);
       const o = (j * size + i) * 4;
       data[o] = Math.round(c[0] * 255);

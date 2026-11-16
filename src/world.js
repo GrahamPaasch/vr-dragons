@@ -407,9 +407,9 @@ export const hex = (h) => srgb(((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, 
  * shaders.js builds its dvDisplay() from these same numbers.
  */
 export const GRADE = {
-  exposure: 1.2,
+  exposure: 1.0,
   gamma: [0.485, 0.4545, 0.425],
-  contrast: 0.4,
+  contrast: 0.5,
 };
 
 const displayChannel = (v, i) => {
@@ -447,8 +447,16 @@ export function fromDisplay(r, g, b) {
   return out;
 }
 
+/**
+ * How far the sun's light wraps past the edge of what it strikes (0: a hard edge at a right
+ * angle to the sun). Not far: with the sun this low it is the difference between lit and
+ * unlit that gives a tree or a hill its shape, and the sides turned from the sun go to the
+ * blue of the dusk.
+ */
+export const SUN_WRAP = 0.16;
+
 export const LIGHT = {
-  sun: [2.7, 0.88, 0.21], // the last of the sun: strong, and deep orange
+  sun: [2.8, 0.8, 0.16], // the last of the sun: strong, and deep orange
   sky: [0.1, 0.117, 0.225], // light from above: the blue of dusk
   bounce: [0.12, 0.06, 0.045], // light from below: dim and warm, off the leaves
   exposure: GRADE.exposure,
@@ -621,7 +629,7 @@ export function rangeColor(k, dx, dz, top, out) {
 /** Light on a surface with unit normal n, as a multiplier per channel. sunlit: 0 shade .. 1 sun. */
 export function lightOn(nx, ny, nz, sunlit, out) {
   // The sun is low and the sky around it is bright: its light wraps a little past the edge.
-  const d = Math.max((nx * SUN_DIR[0] + ny * SUN_DIR[1] + nz * SUN_DIR[2] + 0.3) / 1.3, 0) * sunlit;
+  const d = Math.max((nx * SUN_DIR[0] + ny * SUN_DIR[1] + nz * SUN_DIR[2] + SUN_WRAP) / (1 + SUN_WRAP), 0) * sunlit;
   const up = ny * 0.5 + 0.5;
   for (let i = 0; i < 3; i++) out[i] = lerp(LIGHT.bounce[i], LIGHT.sky[i], up) + LIGHT.sun[i] * d;
   return out;

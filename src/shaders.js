@@ -18,7 +18,7 @@
  */
 
 import * as THREE from '../vendor/three.module.min.js';
-import { SUN_DIR, LIGHT, FOG, GRADE } from './world.js';
+import { SUN_DIR, SUN_WRAP, LIGHT, FOG, GRADE } from './world.js';
 
 /** A number as GLSL wants a float written. */
 const glf = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
@@ -97,7 +97,7 @@ float dvFogAmount(float eyeY, float dirY, float dist) {
 
 vec3 dvLight(vec3 n, float sunlit) {
   // The sun is low and the sky around it is bright: let its light wrap a little past the edge.
-  float d = max((dot(n, uSunDir) + 0.3) / 1.3, 0.0) * sunlit;
+  float d = max((dot(n, uSunDir) + ${glf(SUN_WRAP)}) / ${glf(1 + SUN_WRAP)}, 0.0) * sunlit;
   return mix(uBounceColor, uSkyColor, n.y * 0.5 + 0.5) + uSunColor * d;
 }
 
@@ -194,7 +194,7 @@ export function worldMaterial(shared, options) {
           c = albedo * dvLight(n, sunlit);
           // Low sun through leaves: the side away from the sun is not black but glows a
           // little, deep in the leaf's own colour (the light has been through it twice over).
-          c += albedo * albedo * uSunColor * (max(-dot(n, uSunDir), 0.0) * 0.5 * aux.y * sunlit);
+          c += albedo * albedo * uSunColor * (max(-dot(n, uSunDir), 0.0) * 0.4 * aux.y * sunlit);
         #endif
         // A dragon between the ledge and the low sun: for that moment its shadow is on the
         // ledge and on everything within a few strides of it.
@@ -341,14 +341,22 @@ export function waterMaterial(shared, reflection, noise, bounds) {
       varying vec4 vFog;
       varying float vDim;
       void main() {
-        float n1 = texture2D(uNoise, vWorld * 0.047 + vec2(uTime * 0.019, uTime * 0.011)).r;
-        float n2 = texture2D(uNoise, vWorld * 0.073 - vec2(uTime * 0.015, -uTime * 0.022)).g;
-        // Ripples nudge where the mirror is read.
-        vec4 r = texture2D(uReflection, vUv + (vec2(n1, n2) - 0.5) * 0.006);
-        float sparkle = smoothstep(0.34, 0.46, n1 * n2);
-        // The sun's path: molten, with white-gold glints on it.
-        vec3 c = r.rgb * (0.95 + 0.1 * n1) + vec3(1.0, 0.74, 0.38) * (r.a * (sparkle * 1.25 + 0.2));
-        gl_FragColor = vec4(mix(c, vFog.rgb, vFog.a) * vDim, 1.0);
+        // A slow swell (two noises in one read) nudges where the mirror is read.
+        vec2 swell = texture2D(uNoise, vWorld * 0.047 + vec2(uTime * 0.019, uTime * 0.011)).rg;
+        vec4 r = texture2D(uReflection, vUv + (swell - 0.5) * 0.006);
+        // Small waves, long across the line of sight, running toward the bluff: where two of
+        // them cross, a crest throws the sun at the eye.
+        vec2 crest = texture2D(uNoise, vWorld * vec2(0.085, 0.29) + vec2(uTime * 0.021, uTime * 0.083)).rg;
+        // The sun's path: molten down its middle, breaking up into glints toward its edges
+        // (r.a is how far into the path this water is: the further in, the more crests catch).
+        float glint = smoothstep(0.42 - 0.3 * r.a, 0.5 - 0.3 * r.a, crest.r * crest.g + 0.12 * (swell.r - 0.5));
+        vec3 c = r.rgb * (0.94 + 0.12 * swell.g) + vec3(1.0, 0.62, 0.24) * (r.a * r.a * 0.55);
+        // (Less of the haze than the land gets: the mist on the lake is drawn by itself, in
+        // banks, and between them the water is a dark mirror.)
+        c = mix(c, vFog.rgb, vFog.a * ${glf(0.62)});
+        // The glints are the sun itself, thrown back: the mist dims them, it does not hide them.
+        c += vec3(1.0, 0.74, 0.34) * (glint * r.a * (1.25 - 0.6 * vFog.a));
+        gl_FragColor = vec4(c * vDim, 1.0);
       }
     `,
   });
