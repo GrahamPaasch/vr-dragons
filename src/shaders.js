@@ -325,8 +325,54 @@ export function waterMaterial(shared, reflection, noise, bounds) {
         // Ripples nudge where the mirror is read.
         vec4 r = texture2D(uReflection, vUv + (vec2(n1, n2) - 0.5) * 0.006);
         float sparkle = smoothstep(0.34, 0.46, n1 * n2);
-        vec3 c = r.rgb * (0.95 + 0.1 * n1) + vec3(1.0, 0.86, 0.6) * (r.a * (sparkle * 1.1 + 0.12));
+        // The sun's path: molten, with white-gold glints on it.
+        vec3 c = r.rgb * (0.95 + 0.1 * n1) + vec3(1.0, 0.74, 0.38) * (r.a * (sparkle * 1.25 + 0.2));
         gl_FragColor = vec4(mix(c, vFog.rgb, vFog.a) * vDim, 1.0);
+      }
+    `,
+  });
+}
+
+/**
+ * Mist on the lake: one flat sheet a few metres over the water, see-through, thick in patches
+ * that drift and change slowly (two sines of place and time, per vertex: the sheet is coarse
+ * and so are banks of mist). It takes the colour of the haze, so toward the sun it glows.
+ * A dragon that flies under it is seen through it; one that skims it parts nothing, but that
+ * is not looked at so closely.
+ *
+ *   edge   per vertex: 1 where the sheet lies over open water, 0 where it ends (the shores,
+ *          where the ground comes up through it, and its own rim)
+ */
+export function mistMaterial(shared) {
+  return new THREE.ShaderMaterial({
+    uniforms: Object.assign({ uAmount: { value: 1 } }, shared),
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    vertexShader: /* glsl */ `
+      ${COMMON}
+      uniform float uAmount;
+      attribute float edge;
+      varying vec4 vMist;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        float t = uTime;
+        float bank = sin(wp.x * 0.021 + t * 0.031) * sin(wp.z * 0.017 - t * 0.024 + 1.7 * sin(wp.x * 0.0083 + t * 0.011));
+        float wisp = sin(wp.x * 0.047 - wp.z * 0.039 + t * 0.05);
+        vec3 toP = wp.xyz - cameraPosition;
+        float dist = length(toP);
+        vec3 dir = toP / max(dist, 1.0e-4);
+        // Nothing of it close to the eye, where a flat sheet would be seen for what it is.
+        float a = edge * uAmount * (0.27 + 0.27 * bank + 0.07 * wisp) * smoothstep(25.0, 110.0, dist);
+        vec4 vp = viewMatrix * wp;
+        vMist = vec4(dvDisplay(dvFogColor(dir) * 1.08) * dvVignette(vp.xyz), clamp(a, 0.0, 0.8));
+        gl_Position = projectionMatrix * vp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      varying vec4 vMist;
+      void main() {
+        gl_FragColor = vMist;
       }
     `,
   });

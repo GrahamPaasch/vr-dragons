@@ -20,6 +20,7 @@
  * governor.js, nextSession(). ?scale= and ?aa= in the address overrule what is remembered.
  */
 import { Stage, THREE, WORLD_SEED } from './scene.js';
+import { VIGNETTE } from './shaders.js';
 import { FlatView } from './view.js';
 import { DragonView } from './dragons.js';
 import { DRAGONS } from './dragonGeometry.js';
@@ -136,6 +137,7 @@ async function build() {
         unlockSound();
         governor.reset();
         applyQuality();
+        stage.setVignette(VIGNETTE.vr);
         begin(true);
         // How to call a dragon, on the rim of the ledge; again later if nobody has (see frame).
         state.hint.wanted = true;
@@ -145,6 +147,7 @@ async function build() {
       },
       onSessionEnd: () => {
         state.vr.presenting = false;
+        stage.setVignette(VIGNETTE.flat);
         sound(() => audio.sleep('hidden', document.hidden));
         const report = xr.sessionReport();
         if (report) report.level = state.quality;

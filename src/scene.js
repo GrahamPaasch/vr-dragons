@@ -10,7 +10,7 @@
  */
 
 import {
-  THREE, WIND, makeShared, worldMaterial, skyMaterial, sunMaterial, waterMaterial, leafMaterial,
+  THREE, WIND, makeShared, worldMaterial, skyMaterial, sunMaterial, waterMaterial, leafMaterial, mistMaterial,
 } from './shaders.js';
 import * as W from './world.js';
 import { buildTerrain } from './terrain.js';
@@ -37,6 +37,9 @@ const BARK = W.srgb(0.27, 0.19, 0.13);
 
 /** How big the sun's disc is drawn: its radius in degrees (the real one is a quarter of a degree). */
 export const SUN_DISC = 2.3;
+
+/** How far over the water the sheet of mist lies (metres). */
+const MIST_HEIGHT = 7;
 
 /** Turn MeshBuilder arrays into a three.js geometry. */
 export function toGeometry(arrays, options) {
@@ -108,6 +111,7 @@ export class Stage {
     await step('clouds', '', () => this.buildClouds());
     this.terrain = await step('terrain', '', () => this.buildTerrain());
     await step('water', 'Filling the lake\u2026', () => this.buildWater(o.reflectionSize || 256));
+    await step('mist', '', () => this.buildMist());
     await step('forest', 'Turning the maples\u2026', () => this.buildForest(o.forestDensity || 1));
     await step('ledge', '', () => this.buildLedge());
     await step('grove', '', () => this.buildGrove());
@@ -150,6 +154,36 @@ export class Stage {
         index.push(a, a + 1, a + row, a + 1, a + row + 1, a + row);
       }
     }
+    // The far ranges, painted on the sky: three lines of mountains one behind the other, the
+    // farthest first so that each nearer one is drawn over it (all of the sky is at one depth,
+    // and is drawn in the order it is listed here). Each is dark along its crest and fades
+    // into the haze toward its foot, which is what sets it off from the one behind.
+    const around = 160;
+    const foot = Math.sin((-2.5 * Math.PI) / 180);
+    for (let k = 0; k < W.RANGES.length; k++) {
+      const first = position.length / 3;
+      for (let i = 0; i <= around; i++) {
+        const az = (i / around) * Math.PI * 2;
+        const dx = Math.sin(az);
+        const dz = -Math.cos(az);
+        const crest = (W.rangeCrest(k, dx, dz) * Math.PI) / 180;
+        // Crest, a little way down it, and well under the horizon.
+        const rows = [[crest, 1], [crest * 0.42, 0.36], [Math.asin(foot), 0]];
+        for (const [el, top] of rows) {
+          const cosE = Math.cos(el);
+          position.push(dx * cosE, Math.sin(el), dz * cosE);
+          W.toDisplay(W.rangeColor(k, dx, dz, top, c));
+          color.push(c[0], c[1], c[2]);
+        }
+      }
+      for (let i = 0; i < around; i++) {
+        for (let r = 0; r < 2; r++) {
+          const a = first + i * 3 + r;
+          index.push(a, a + 3, a + 1, a + 3, a + 4, a + 1);
+        }
+      }
+    }
+    this.skyTriangles = index.length / 3;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(color, 3));
@@ -371,6 +405,52 @@ export class Stage {
     const bx = p.getX(2) - p.getX(0);
     const bz = p.getZ(2) - p.getZ(0);
     if (az * bx - ax * bz < 0) water.material.side = THREE.BackSide;
+  }
+
+  /**
+   * Mist lying on the lake: one coarse sheet a few metres over the water (see mistMaterial).
+   * It ends where the land comes up through it, and well short of the ledge.
+   */
+  buildMist() {
+    const L = W.LAKE;
+    const y = W.LAKE_LEVEL + MIST_HEIGHT;
+    const cell = 32;
+    const p0 = -Math.ceil((L.a + 60) / cell);
+    const p1 = Math.ceil((L.a + 150) / cell); // further toward the sun than toward the ledge
+    const q1 = Math.ceil((L.b + 70) / cell);
+    const position = [];
+    const edge = [];
+    const index = [];
+    const cols = 2 * q1 + 1;
+    for (let i = p0; i <= p1; i++) {
+      for (let j = -q1; j <= q1; j++) {
+        const [x, z] = W.lakePoint(i * cell, j * cell);
+        position.push(x, y, z);
+        // Thinning to nothing where the ground is within a few metres under the sheet, and
+        // at the sheet's own rim.
+        const room = y - this.terrain.heightAt(x, z);
+        const rim = Math.min(i - p0, p1 - i, j + q1, q1 - j);
+        edge.push(Math.min(Math.max((room - 1.5) / 5, 0), 1) * Math.min(rim / 1.5, 1));
+      }
+    }
+    for (let i = 0; i < p1 - p0; i++) {
+      for (let j = 0; j < cols - 1; j++) {
+        const a = i * cols + j;
+        // No face where there is no mist at any of its corners.
+        if (edge[a] + edge[a + 1] + edge[a + cols] + edge[a + cols + 1] <= 0) continue;
+        index.push(a, a + cols, a + 1, a + 1, a + cols, a + cols + 1);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+    g.setAttribute('edge', new THREE.Float32BufferAttribute(edge, 1));
+    g.setIndex(index);
+    g.computeBoundingSphere();
+    const mesh = new THREE.Mesh(g, mistMaterial(this.shared));
+    mesh.renderOrder = 65; // over the lake and the dragons' mirror images, under their fire
+    this.scene.add(mesh);
+    this.mist = mesh;
+    this.mistTriangles = index.length / 3;
   }
 
   // -------------------------------------------------------------------------------------------
@@ -681,6 +761,11 @@ export class Stage {
   setWind(strength) {
     const k = 0.45 + 1.05 * strength;
     this.shared.uWind.value.set(WIND[0] * k, WIND[1] * k);
+  }
+
+  /** How much darker the edge of the view is than its middle (see VIGNETTE in shaders.js). */
+  setVignette(amount) {
+    this.shared.uVignette.value = amount;
   }
 
   /** How much of the sun a dragon covers just now, seen from the ledge (0..1). */

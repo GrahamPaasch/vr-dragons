@@ -25,7 +25,7 @@ export function reflectionBounds() {
 }
 
 const DEEP = [0.012, 0.04, 0.055]; // looking down into the water
-const SHALLOW = [0.17, 0.16, 0.1];
+const SHALLOW = [0.1, 0.08, 0.065];
 /** A mirrored ray that clears the land by less than this (radians) still sees some of it: the soft outline of the hills. */
 const EDGE = 0.045;
 /** How much of the sky's glow the haze in front of a far hill takes on, toward the sun. */
@@ -134,7 +134,7 @@ export function bakeReflection(size, heights, far, sunHeight, eye) {
       const cosI = Math.abs(dy);
       const mirror = 0.1 + 0.9 * Math.pow(1 - cosI, 2.6);
       const dl = lakeDistance(x, z);
-      const shore = smoothstep(-4, 0, dl) * 0.55;
+      const shore = smoothstep(-4, 0, dl) * 0.42;
       for (let q = 0; q < 3; q++) {
         c[q] = lerp(DEEP[q], c[q] * 0.92, mirror);
         c[q] = lerp(c[q], SHALLOW[q], shore);
@@ -145,7 +145,7 @@ export function bakeReflection(size, heights, far, sunHeight, eye) {
       const cosAz = (dx * SUN_DIR[0] + dz * SUN_DIR[2]) / (flat * sunFlat);
       const az = Math.acos(Math.min(Math.max(cosAz, -1), 1));
       const el = Math.asin(ry) - SUN_ELEVATION;
-      let glitter = Math.exp(-(az * az) / (0.075 * 0.075)) * Math.exp(-(el * el) / (0.2 * 0.2));
+      let glitter = Math.exp(-(az * az) / (0.095 * 0.095)) * Math.exp(-(el * el) / (0.24 * 0.24));
       glitter *= sunlitAt(sunHeight, x, LAKE_LEVEL + 0.5, z, 2) * (1 - shore);
       const o = (j * size + i) * 4;
       data[o] = Math.round(c[0] * 255);

@@ -446,7 +446,7 @@ export function fromDisplay(r, g, b) {
 
 export const LIGHT = {
   sun: [2.7, 0.88, 0.21], // the last of the sun: strong, and deep orange
-  sky: [0.085, 0.115, 0.27], // light from above: the blue of dusk
+  sky: [0.1, 0.117, 0.225], // light from above: the blue of dusk
   bounce: [0.12, 0.06, 0.045], // light from below: dim and warm, off the leaves
   exposure: GRADE.exposure,
 };
@@ -552,6 +552,65 @@ export function skyColor(dx, dy, dz, out, glow) {
     out[0] += g;
     out[1] += g * 0.55;
     out[2] += g * 0.16;
+  }
+  return out;
+}
+
+/**
+ * The far ranges: three lines of mountains beyond everything that is built, one behind the
+ * other, each paler than the one in front. They are what makes the valley one valley in a big
+ * country. Nothing is built for them: they are painted on the sky (scene.js, buildSky), so
+ * they cost no depth and no haze, and they stand where real ones would, at no parallax.
+ *   high   how high the tallest crests stand above the horizon (degrees)
+ *   grain  how many peaks there are to the turn (more: narrower peaks)
+ *   dim    its crests' share of the haze's light (the nearer, the darker)
+ *   sky    how far its colour has gone over to the sky's (the farther, the more)
+ * Farthest first.
+ */
+export const RANGES = [
+  { high: 8.2, grain: 6.4, seed: 3.7, dim: 1, sky: 0.5 },
+  { high: 5.2, grain: 4.9, seed: 11.2, dim: 0.8, sky: 0.14 },
+  { high: 3.0, grain: 3.5, seed: 23.9, dim: 0.6, sky: 0 },
+];
+
+/**
+ * How high the crest of range k stands above the horizon in the direction (dx, dz), in
+ * degrees. The sun goes down in a saddle of the ranges, between two shoulders.
+ */
+export function rangeCrest(k, dx, dz) {
+  const R = RANGES[k];
+  const flat = Math.hypot(dx, dz) || 1;
+  const x = dx / flat;
+  const z = dz / flat;
+  // Noise read round a circle, so that the line closes on itself behind the viewer.
+  const n = fbm(x * R.grain + R.seed, z * R.grain - R.seed, 4);
+  // Crests where the noise crosses nought: sharp on top, wide at the foot.
+  const peak = Math.pow(clamp(1 - 1.7 * Math.abs(n), 0, 1), 1.4);
+  const roll = 0.5 + 0.5 * noise2(x * R.grain * 0.31 - R.seed, z * R.grain * 0.31 + R.seed);
+  const off = Math.acos(clamp((x * SUN_DIR[0] + z * SUN_DIR[2]) / SUN_FLAT, -1, 1));
+  const saddle = Math.exp(-Math.pow(off / 0.17, 2));
+  const shoulder = Math.exp(-Math.pow((off - 0.42) / 0.2, 2));
+  return R.high * (0.3 + 0.5 * peak + 0.2 * roll + 0.22 * shoulder) * (1 - 0.6 * saddle);
+}
+
+/**
+ * The colour (linear) of range k in the direction (dx, dz): at its crest (`top` 1) and down
+ * toward its foot (`top` 0), where it stands in the haze of the valley behind the range in
+ * front. Into `out`.
+ */
+export function rangeColor(k, dx, dz, top, out) {
+  const R = RANGES[k];
+  const flat = Math.hypot(dx, dz) || 1;
+  fogColor(dx / flat, 0, dz / flat, tmpFog);
+  // The sky a little above the horizon: what the haze between the ranges shines with.
+  const e = Math.sin(1.3 * DEG);
+  const c = Math.cos(1.3 * DEG);
+  skyColor((dx / flat) * c, e, (dz / flat) * c, out, false);
+  for (let i = 0; i < 3; i++) {
+    const sky = out[i];
+    const crest = lerp(tmpFog[i] * R.dim, sky, R.sky);
+    const foot = lerp(tmpFog[i], sky, 0.55 + 0.3 * R.sky);
+    out[i] = lerp(foot, crest, top);
   }
   return out;
 }
@@ -791,7 +850,7 @@ export function groundColor(x, z, h, slope, out) {
   const rock = srgb(0.5 + 0.07 * n, 0.4 + 0.05 * n, 0.43 + 0.05 * n); // quartzite: grey with a pink cast
   const grass = srgb(0.6 + 0.08 * n, 0.52 + 0.06 * n, 0.24);
   const litter = srgb(0.4 + 0.08 * n, 0.25 + 0.05 * n, 0.12);
-  const sand = srgb(0.52, 0.46, 0.34);
+  const sand = srgb(0.38, 0.31, 0.25);
   let c = grass;
   const mix = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
   c = mix(c, litter, smoothstep(0.15, 0.7, f));
