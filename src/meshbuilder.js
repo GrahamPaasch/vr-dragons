@@ -156,7 +156,11 @@ export class MeshBuilder {
   /**
    * A lumpy ball: an icosahedron (detail 0: 20 faces, 1: 80, 2: 320) stretched to `radius`
    * [rx, ry, rz] around `center` and pushed in and out by `bumps` (0 = smooth).
-   * color: one colour, or (unitDirection, faceIndex) => colour. aux likewise.
+   * color: one colour, or (unitDirection of the face, faceIndex) => colour.
+   * aux: one set of four numbers, or (unitDirection of a corner) => four numbers. It is worked
+   * out per corner, not per face, so that the faces which meet at a corner agree there: aux
+   * carries how far a vertex sways in the wind, and faces that swayed by different amounts
+   * came apart along their edges, with the background showing through as hairlines.
    */
   blob(center, radius, detail, bumps, seed, color, aux) {
     const sphere = icosphere(detail);
@@ -168,16 +172,16 @@ export class MeshBuilder {
       moved[i] = [center[0] + d[0] * radius[0] * k, center[1] + d[1] * radius[1] * k, center[2] + d[2] * radius[2] * k];
     }
     const colorFn = typeof color === 'function' ? color : null;
-    const auxFn = typeof aux === 'function' ? aux : null;
+    const auxAt = typeof aux === 'function' ? verts.map((d) => aux(d)) : null;
     const dir = [0, 0, 0];
     for (let f = 0; f < sphere.faces.length; f++) {
       const [a, b, c] = sphere.faces[f];
-      if (colorFn || auxFn) {
+      if (colorFn) {
         dir[0] = (verts[a][0] + verts[b][0] + verts[c][0]) / 3;
         dir[1] = (verts[a][1] + verts[b][1] + verts[c][1]) / 3;
         dir[2] = (verts[a][2] + verts[b][2] + verts[c][2]) / 3;
       }
-      this.tri(moved[a], moved[b], moved[c], colorFn ? colorFn(dir, f) : color, auxFn ? auxFn(dir, f) : aux);
+      this.tri(moved[a], moved[b], moved[c], colorFn ? colorFn(dir, f) : color, auxAt ? [auxAt[a], auxAt[b], auxAt[c]] : aux);
     }
     return this;
   }

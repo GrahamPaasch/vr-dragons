@@ -117,6 +117,7 @@ async function inventory() {
     forestTriangles: Math.round(forestTriangles),
     terrainTriangles: d.stage.terrain.triangles,
     ledgeTriangles: d.stage.ledgeTriangles,
+    groveTriangles: d.stage.groveTriangles,
     dragonTriangles: d.dragons.map((x) => x.triangles),
     leaves: d.stage.leaves.geometry.instanceCount,
     waterTriangles: d.stage.water.geometry.attributes.position.count / 3,
@@ -200,10 +201,11 @@ if (asJson) {
   const i = out.inventory;
   const pad = (v, n) => String(v).padStart(n);
   console.log(`What is in the scene`);
-  console.log(`  ${i.meshes} meshes (one draw call each when in view): terrain, lake, sky, sun, clouds, ${i.forestMeshes} forest batches, the ledge, the leaves, 2 dragons, their 2 mirror images and their 2 fires`);
+  console.log(`  ${i.meshes} meshes (one draw call each when in view): terrain, lake, sky, sun, clouds, ${i.forestMeshes} forest batches, the ledge, the big trees by the creek, the leaves, 2 dragons, their 2 mirror images and their 2 fires, and the line of words shown in the headset`);
   console.log(`  forest   ${pad(i.trees, 6)} trees, instanced, ${i.forestTriangles} triangles in all`);
   console.log(`  terrain  ${pad(i.terrainTriangles, 6)} triangles (lit once at start, not per frame)`);
   console.log(`  ledge    ${pad(i.ledgeTriangles, 6)} triangles (7 trees close by, boulders, fallen leaves)`);
+  console.log(`  grove    ${pad(i.groveTriangles, 6)} triangles (9 big trees at the mouth of the creek, which the dragons fly between)`);
   console.log(`  dragons  ${pad(i.dragonTriangles.join(' + '), 6)} triangles, 24 bones each, posed in the vertex shader`);
   console.log(`  leaves   ${pad(i.leaves, 6)} in the air, one instanced draw call, animated in the vertex shader`);
   console.log(`  lake     ${pad(i.waterTriangles, 6)} triangles; its mirror image is a 256 x 256 texture worked out at start`);

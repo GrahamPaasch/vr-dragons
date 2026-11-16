@@ -1047,11 +1047,13 @@ const SHY_FAR = 52;
 export class Director {
   /**
    * builds: [{ beat, size }, { beat, size }] for the two dragons. seed: any integer; the same
-   * seed always gives the same flight.
+   * seed always gives the same flight. options: { opening: the names of the lanes to begin with,
+   * instead of the usual opening (the tools use it to look at one lane) }.
    */
-  constructor(builds, seed) {
+  constructor(builds, seed, options) {
     this.builds = builds;
     this.seed = seed;
+    this.script = options && options.opening ? options.opening : OPENING;
     this.reset();
   }
 
@@ -1069,7 +1071,7 @@ export class Director {
     this.recent = []; // the last few lanes chosen, newest last
     this.lull = 0; // seconds planned far from the viewer at the end of the path so far
     this.planned = 0; // seconds of flight laid out so far
-    this.opening = OPENING.slice();
+    this.opening = this.script.slice();
     this.center = OPENING_START; // how far along the path the middle of the pair is
     this.lead = 1; // +1: the first dragon is in front
     this.gap = 26; // signed: positive when the first dragon is ahead

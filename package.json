@@ -13,6 +13,7 @@
     "fly": "node tools/flysim.mjs",
     "shots": "node tools/shots.mjs",
     "sheet": "node tools/sheet.mjs",
+    "contrast": "node tools/contrast.mjs",
     "map": "node tools/map.mjs"
   },
   "devDependencies": {

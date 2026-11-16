@@ -27,6 +27,9 @@ export const WORLD_SEED = 20261115;
 const LEAF_COUNT = 190;
 export const LEAF_BOX = { min: [-10.5, -7, -11.5], size: [20, 19, 19] };
 
+/** The one line of words shown in the headset, on the rim of the ledge. */
+const HINT_TEXT = 'Pull the trigger to call a dragon';
+
 /** Azimuth slices the forest is split into, so trees behind the viewer are not drawn. */
 const FOREST_SECTORS = 6;
 
@@ -106,6 +109,7 @@ export class Stage {
     await step('ledge', '', () => this.buildLedge());
     await step('grove', '', () => this.buildGrove());
     await step('leaves', '', () => this.buildLeaves(o.leaves === undefined ? LEAF_COUNT : o.leaves));
+    await step('hint', '', () => this.buildHint(HINT_TEXT));
     this.built = true;
   }
 
@@ -144,52 +148,66 @@ export class Stage {
     g.setIndex(index);
     const sky = new THREE.Mesh(g, skyMaterial());
     sky.frustumCulled = false;
-    sky.renderOrder = 100; // after everything solid: only the pixels that are still empty
+    // After everything solid (so it only costs the pixels that are still empty), and BEFORE
+    // the lake, the dragons' mirror images and their fire, none of which leaves a mark in the
+    // depth buffer: drawn after those, the sky took any pixel of them that had no land behind
+    // it. (The lake bed is cut out of the land's mesh where it is never seen, and through that
+    // hole the far end of the lake showed as a flat slab of sky colour.)
+    sky.renderOrder = 35;
     this.scene.add(sky);
     this.sky = sky;
 
-    // The sun: a disc and its glare, added on top.
+    // The sun: its disc with the bright core of its glow, which anything in front hides, and
+    // a wide faint glare that lies over everything (see sunMaterial). One mesh.
     const sunPos = [];
     const sunCol = [];
+    const sunPart = [];
     const sunIdx = [];
     const s = W.SUN_DIR;
     const side = new THREE.Vector3(s[2], 0, -s[0]).normalize();
     const up = new THREE.Vector3().crossVectors(new THREE.Vector3(s[0], s[1], s[2]), side).normalize();
-    const radii = [0, 0.9, 1.45, 1.9, 3, 5, 8, 12, 17].map((d) => (d * Math.PI) / 180);
     const spokes = 28;
-    const glare = (theta) => {
-      const deg = (theta * 180) / Math.PI;
-      const disc = deg < 1.5 ? 1 : 0;
-      const fade = Math.max(0, Math.min(1, (17 - deg) / 9));
-      const halo = (0.5 * Math.exp(-deg / 2.2) + 0.2 * Math.exp(-deg / 7)) * fade;
-      return [disc * 0.55 + halo, disc * 0.5 + halo * 0.8, disc * 0.34 + halo * 0.5];
+    const rings = (degrees, part, colourAt) => {
+      const first = sunPos.length / 3;
+      for (let r = 0; r < degrees.length; r++) {
+        const radius = (degrees[r] * Math.PI) / 180;
+        const col = colourAt(degrees[r]);
+        for (let k = 0; k < spokes; k++) {
+          const a = (k / spokes) * Math.PI * 2;
+          const sn = Math.sin(radius);
+          const cs = Math.cos(radius);
+          sunPos.push(
+            s[0] * cs + (side.x * Math.cos(a) + up.x * Math.sin(a)) * sn,
+            s[1] * cs + (side.y * Math.cos(a) + up.y * Math.sin(a)) * sn,
+            s[2] * cs + (side.z * Math.cos(a) + up.z * Math.sin(a)) * sn
+          );
+          sunCol.push(col[0], col[1], col[2]);
+          sunPart.push(part);
+        }
+      }
+      for (let r = 0; r + 1 < degrees.length; r++) {
+        for (let k = 0; k < spokes; k++) {
+          const a = first + r * spokes + k;
+          const b = first + r * spokes + ((k + 1) % spokes);
+          sunIdx.push(a, b, a + spokes, b, b + spokes, a + spokes);
+        }
+      }
     };
-    for (let r = 0; r < radii.length; r++) {
-      for (let k = 0; k < spokes; k++) {
-        const a = (k / spokes) * Math.PI * 2;
-        const sn = Math.sin(radii[r]);
-        const cs = Math.cos(radii[r]);
-        sunPos.push(
-          s[0] * cs + (side.x * Math.cos(a) + up.x * Math.sin(a)) * sn,
-          s[1] * cs + (side.y * Math.cos(a) + up.y * Math.sin(a)) * sn,
-          s[2] * cs + (side.z * Math.cos(a) + up.z * Math.sin(a)) * sn
-        );
-        const col = glare(radii[r]);
-        sunCol.push(col[0], col[1], col[2]);
-      }
-    }
-    for (let r = 0; r + 1 < radii.length; r++) {
-      for (let k = 0; k < spokes; k++) {
-        const a = r * spokes + k;
-        const b = r * spokes + ((k + 1) % spokes);
-        sunIdx.push(a, b, a + spokes, b, b + spokes, a + spokes);
-      }
-    }
+    rings([0, 0.9, 1.45, 1.9, 3, 5, 8], 0, (deg) => {
+      const disc = deg < 1.5 ? 1 : 0;
+      const core = 0.5 * Math.exp(-deg / 2.2) * Math.max(0, Math.min(1, (8 - deg) / 3));
+      return [disc * 0.55 + core, disc * 0.5 + core * 0.8, disc * 0.34 + core * 0.5];
+    });
+    rings([0, 3, 6, 10, 14, 17], 1, (deg) => {
+      const wide = 0.2 * Math.exp(-deg / 7) * Math.max(0, Math.min(1, (17 - deg) / 9));
+      return [wide, wide * 0.8, wide * 0.5];
+    });
     const sg = new THREE.BufferGeometry();
     sg.setAttribute('position', new THREE.Float32BufferAttribute(sunPos, 3));
     sg.setAttribute('color', new THREE.Float32BufferAttribute(sunCol, 3));
+    sg.setAttribute('part', new THREE.Float32BufferAttribute(sunPart, 1));
     sg.setIndex(sunIdx);
-    const sun = new THREE.Mesh(sg, sunMaterial());
+    const sun = new THREE.Mesh(sg, sunMaterial(this.shared));
     sun.frustumCulled = false;
     sun.renderOrder = 200;
     this.scene.add(sun);
@@ -212,7 +230,7 @@ export class Stage {
     ];
     for (const [azDeg, elDeg, wideDeg, lumps] of bank) {
       const az = (azDeg * Math.PI) / 180;
-      // Not across the sun: the glare is drawn over everything, and would shine through a cloud.
+      // Not across the sun: its place is the far end of the valley, clear.
       if (Math.abs(Math.atan2(Math.sin(az - sunAz), Math.cos(az - sunAz))) < 0.3 && elDeg < 24) continue;
       const dist = 2300;
       const cx = -Math.sin(az) * dist;
@@ -250,7 +268,7 @@ export class Stage {
     }
     const mesh = new THREE.Mesh(toGeometry(m.arrays(), { normal: false }), worldMaterial(this.shared, { haze: 0.38 }));
     mesh.frustumCulled = false;
-    mesh.renderOrder = 90; // after the land, which hides most of them; before the sky
+    mesh.renderOrder = 32; // after the land, which hides most of them; before the sky
     this.scene.add(mesh);
     this.clouds = mesh;
   }
@@ -510,10 +528,14 @@ export class Stage {
 
   /**
    * Words in the world, for the headset (where there is no page to read): a line of text that
-   * stands on the rim of the ledge in front of the viewer, fades in, and fades out again.
+   * stands over the rim of the ledge in front of the viewer, fades in, and fades out again.
+   *
+   * It is made here, once, with everything else, and stays in the scene unseen: its shader
+   * is then compiled with the others while the page loads and its picture is already on the
+   * graphics chip. (Made when a session starts, it cost the headset a dropped frame or ten two
+   * seconds into every session, just as the person began to look around.)
    */
-  showHint(text, seconds) {
-    this.hideHint();
+  buildHint(text) {
     const canvas = document.createElement('canvas');
     canvas.width = 1024;
     canvas.height = 128;
@@ -532,26 +554,42 @@ export class Stage {
     texture.generateMipmaps = false;
     const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0, depthWrite: false, depthTest: false, fog: false, toneMapped: false });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.7 / 8), material);
-    // On the rim, below the line of sight to the valley, turned up to face the viewer.
-    mesh.position.set(0, 0.78, -2.1);
+    // Over the rim, below the line of sight to the lake, turned up to face the viewer.
+    mesh.position.set(0, 0.62, -2.3);
     mesh.lookAt(0, 1.55, 0);
     mesh.renderOrder = 300;
+    mesh.visible = false;
     this.scene.add(mesh);
-    this.hint = { mesh, material, texture, age: 0, seconds: seconds || 14, text };
+    try {
+      this.renderer.initTexture(texture);
+    } catch (err) {
+      /* it will be sent when it is first drawn */
+    }
+    this.hint = { mesh, material, texture, age: 0, seconds: 0, text, showing: false, shown: 0 };
+  }
+
+  /** Show the line for this many seconds (it takes two and a half to begin to appear). */
+  showHint(seconds) {
+    const h = this.hint;
+    if (!h) return;
+    h.age = 0;
+    h.seconds = seconds || 14;
+    h.showing = true;
+    h.shown++;
+    h.material.opacity = 0;
   }
 
   hideHint() {
-    if (!this.hint) return;
-    this.scene.remove(this.hint.mesh);
-    this.hint.mesh.geometry.dispose();
-    this.hint.material.dispose();
-    this.hint.texture.dispose();
-    this.hint = null;
+    const h = this.hint;
+    if (!h) return;
+    h.showing = false;
+    h.mesh.visible = false;
+    h.material.opacity = 0;
   }
 
   updateHint(dt) {
     const h = this.hint;
-    if (!h) return;
+    if (!h || !h.showing) return;
     h.age += dt;
     const fadeIn = Math.min(Math.max((h.age - 2.5) / 1.5, 0), 1);
     const fadeOut = Math.min(Math.max((h.seconds - h.age) / 2, 0), 1);
@@ -589,6 +627,22 @@ export class Stage {
   setWind(strength) {
     const k = 0.45 + 1.05 * strength;
     this.shared.uWind.value.set(WIND[0] * k, WIND[1] * k);
+  }
+
+  /** How much of the sun a dragon covers just now, seen from the ledge (0..1). */
+  setCover(cover) {
+    this.shared.uCover.value = cover;
+  }
+
+  /** Carry the leaves in the air this much further (metres): the wake of a dragon going by. */
+  blowLeaves(dx, dy, dz) {
+    if (!this.leaves) return;
+    // (It only ever grows, by a few metres a pass: each leaf takes its own share of it, so it
+    // cannot be brought back into the box here without every leaf jumping.)
+    const blown = this.leaves.material.uniforms.uBlown.value;
+    blown.x += dx;
+    blown.y += dy;
+    blown.z += dz;
   }
 
   render() {

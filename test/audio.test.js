@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as A from '../src/audio.js';
-import { Governor, QUALITY } from '../src/governor.js';
+import { Governor, QUALITY, QUALITY_WORDS, nextSession } from '../src/governor.js';
 import { makeRng } from '../src/rng.js';
 import { KEEP_OUT } from '../src/flight.js';
 
@@ -104,36 +104,99 @@ test('the governor leaves a picture that keeps up alone', () => {
   assert.equal(g.level, 0, 'pauses are not slow frames');
 });
 
-test('when frames keep coming late it thins the picture one step at a time, and never puts it back', () => {
+test('when frames keep coming late it does less, one step at a time, and never puts it back', () => {
   const g = new Governor();
   // A headset running at half rate: every frame takes two.
   const first = run(g, 4, 36, 1 / 72);
   assert.equal(first, 0, 'not in the first seconds: things are still settling');
-  const more = run(g, 8, 36, 1 / 72);
-  assert.ok(more >= 1, 'then it steps down');
-  assert.ok(g.level >= 1);
-  run(g, 120, 36, 1 / 72);
-  assert.equal(g.level, QUALITY.length - 1, 'as far as the last step, no further');
+  const more = run(g, 4, 36, 1 / 72);
+  assert.equal(more, 1, 'then it steps down: within eight seconds, however slow the frames are');
+  assert.equal(g.level, 1);
+  run(g, 30, 36, 1 / 72);
+  assert.equal(g.level, QUALITY.length - 1, 'the last step is reached within forty seconds, and that is as far as it goes');
   const level = g.level;
   run(g, 120, 72, 1 / 72);
   assert.equal(g.level, level, 'and it does not step back up');
   g.reset();
   assert.equal(g.level, 0, 'until the next session');
+  // It is time that is judged, not a number of frames: a third of the rate gets no longer.
+  const slow = new Governor();
+  let seconds = 0;
+  while (slow.level === 0 && seconds < 60) {
+    slow.frame(3 / 72, 1 / 72);
+    seconds += 3 / 72;
+  }
+  assert.ok(seconds < 8.5, 'at 24 frames a second the first step comes after ' + seconds.toFixed(1) + ' s');
 });
 
-test('one frame in five late is enough, even if the average looks fine', () => {
-  const g = new Governor();
-  let changed = false;
-  for (let i = 0; i < 72 * 30; i++) if (g.frame(i % 5 === 0 ? 2 / 72 : 0.8 / 72, 1 / 72)) changed = true;
-  assert.ok(changed);
+test('one frame in ten late is enough, even if the average looks fine; one in fifty is not', () => {
+  const late = (every) => {
+    const g = new Governor();
+    for (let i = 0; i < 72 * 30; i++) g.frame(i % every === 0 ? 2 / 72 : 0.9 / 72, 1 / 72);
+    return g.level;
+  };
+  assert.ok(late(5) >= 1, 'one in five');
+  assert.ok(late(10) >= 1, 'one in ten: seven stutters a second');
+  assert.equal(late(50), 0, 'one in fifty is a hitch now and then, not a reason');
 });
 
-test('each step draws less than the one before', () => {
+test('each step does less than the one before, and the first costs the processor less, not the picture', () => {
   for (let i = 1; i < QUALITY.length; i++) {
     assert.ok(QUALITY[i].forest < QUALITY[i - 1].forest);
     assert.ok(QUALITY[i].leaves < QUALITY[i - 1].leaves);
+    assert.equal(QUALITY[i].sound, 'lite', 'the cheaper sound from the first step on');
   }
-  assert.deepEqual(QUALITY[0], { forest: 1, leaves: 1, mirror: true });
+  assert.deepEqual(QUALITY[0], { forest: 1, leaves: 1, mirror: true, sound: 'full' });
   assert.ok(QUALITY[QUALITY.length - 1].forest >= 0.4, 'the valley is still a forest at the last step');
+  assert.equal(QUALITY_WORDS.length, QUALITY.length, 'every step can be put into words');
   assert.ok(new Governor().frame(NaN, 1 / 72) === false);
+});
+
+test('a session that could not keep up makes the next one cheaper in pixels, a step at a time', () => {
+  const good = { seconds: 300, fps: 71, target: 72, late: 0.01, level: 0 };
+  const poor = { seconds: 300, fps: 48, target: 72, late: 0.3, level: 3 };
+  const fresh = { scale: 1, aa: true };
+  // A good session changes nothing, and neither does one too short to tell.
+  assert.deepEqual(nextSession(fresh, good), { scale: 1, aa: true, change: '', words: '' });
+  assert.equal(nextSession(fresh, Object.assign({}, poor, { seconds: 8 })).change, '');
+  assert.equal(nextSession(fresh, null).change, '');
+  // A poor one: first a smaller picture, then no anti-aliasing, then smaller again, then nothing.
+  const first = nextSession(fresh, poor);
+  assert.equal(first.scale, 0.8);
+  assert.equal(first.aa, true);
+  assert.match(first.words, /0\.8 of full size/);
+  const second = nextSession(first, poor);
+  assert.equal(second.scale, 0.8);
+  assert.equal(second.aa, false);
+  assert.match(second.words, /anti-aliasing/);
+  const third = nextSession(second, poor);
+  assert.equal(third.scale, 0.65);
+  assert.equal(third.aa, false);
+  const last = nextSession(third, poor);
+  assert.equal(last.change, '');
+  assert.equal(last.scale, 0.65);
+  assert.match(last.words, /nothing left/);
+  // Each of the ways a session can be poor counts on its own.
+  assert.equal(nextSession(fresh, Object.assign({}, good, { level: 2 })).change, 'scale', 'two steps down');
+  assert.equal(nextSession(fresh, Object.assign({}, good, { late: 0.12 })).change, 'scale', 'a tenth of the frames late');
+  assert.equal(nextSession(fresh, Object.assign({}, good, { fps: 58 })).change, 'scale', 'under 85% of the rate');
+  // Nothing is ever put back by a good session.
+  assert.equal(nextSession(third, good).scale, 0.65);
+  // And nothing remembered at all is the same as a first visit.
+  assert.equal(nextSession(null, poor).scale, 0.8);
+});
+
+test('the rush of a dragon grows as it comes close, and stands back while it beats its wings', () => {
+  assert.equal(A.rushLevel(4, 20), 0, 'none when it is hardly moving');
+  assert.ok(A.rushLevel(16, 15) > 3 * A.rushLevel(16, 80), 'at 15 m ' + A.rushLevel(16, 15).toFixed(2) + ', at 80 m ' + A.rushLevel(16, 80).toFixed(2));
+  assert.equal(A.rushLevel(16, 80), A.rushLevel(16, 300), 'beyond 45 m only its speed counts');
+  assert.ok(A.rushLevel(25, 15) > A.rushLevel(15, 15), 'faster is louder');
+  let last = 0;
+  for (const d of [60, 40, 30, 20, 12]) {
+    const level = A.rushLevel(16, d);
+    assert.ok(level >= last, 'never quieter for being nearer: ' + d + ' m');
+    last = level;
+  }
+  assert.ok(A.rushLevel(16, 15, 0.6) < 0.5 * A.rushLevel(16, 15, 0), 'behind the wingbeats');
+  assert.ok(A.rushLevel(16, 15, 0.6) > 0, 'but not gone');
 });

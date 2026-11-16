@@ -328,11 +328,13 @@ export const DRAGONS = [
     name: 'Tarn',
     build: { scale: 0.78, neck: 1.08, tail: 1.12, wing: 1.06, bulk: 0.9, horn: 1.25 },
     beat: 1.28,
+    // Its upper side is a light teal on purpose: a dark one sat at the value of shaded forest,
+    // and beyond a hundred metres it was lost against the hillsides.
     colors: {
-      back: [0.06, 0.3, 0.38],
-      side: [0.09, 0.44, 0.49],
+      back: [0.1, 0.42, 0.48],
+      side: [0.12, 0.5, 0.54],
       belly: [0.82, 0.88, 0.78],
-      wingTop: [0.1, 0.38, 0.44],
+      wingTop: [0.2, 0.62, 0.62],
       wingUnder: [0.5, 0.8, 0.76],
       bone: [0.05, 0.16, 0.22],
       horn: [0.86, 0.84, 0.74],

@@ -234,7 +234,7 @@ async function flatScreen(browser, base) {
     assert.equal(again.answered, 1);
   });
 
-  await check('the called dragon passes close overhead, roars, and never comes nearer than 9 m', async () => {
+  await check('the called dragon passes close by, roars, and never comes nearer than 9 m', async () => {
     // Run the flight ahead rather than wait half a minute.
     const s = await app(page, () => {
       const d = window.__dragons;
@@ -242,21 +242,84 @@ async function flatScreen(browser, base) {
       let passed = false;
       let roared = false;
       let nearest = Infinity;
-      for (let i = 0; i < 72 * 40 && !(passed && !d.director.jobs.some(Boolean)); i++) {
+      let up = 0;
+      for (let i = 0; i < 72 * 50 && !(passed && !d.director.jobs.some(Boolean)); i++) {
         d.director.step(dt);
         for (const e of d.director.drain()) {
           if (e.type === 'pass') passed = true;
           if (e.type === 'roar' && e.kind === 'call') roared = true;
         }
-        for (const f of d.director.flyers) nearest = Math.min(nearest, Math.hypot(f.x, f.y - 1.62, f.z));
+        d.director.flyers.forEach((f, k) => {
+          const range = Math.hypot(f.x, f.y - 1.62, f.z);
+          if (d.director.jobs[k] && d.director.jobs[k].phase !== 'out' && range < nearest) {
+            nearest = range;
+            up = (Math.atan2(f.y - 1.62, Math.hypot(f.x, f.z)) * 180) / Math.PI;
+          }
+        });
       }
-      return { passed, roared, nearest, free: !d.director.jobs.some(Boolean) };
+      return { passed, roared, nearest, up, free: !d.director.jobs.some(Boolean) };
     });
     assert.equal(s.passed, true, 'it came past');
     assert.equal(s.roared, true, 'it roared on the way in');
     assert.ok(s.nearest < 16, 'close: ' + s.nearest.toFixed(1) + ' m');
     assert.ok(s.nearest >= 9, 'but not too close: ' + s.nearest.toFixed(1) + ' m');
+    assert.ok(s.up > 15 && s.up < 45, 'where it can be watched, not overhead: ' + s.up.toFixed(0) + ' degrees up');
     assert.equal(s.free, true, 'and went back to the other one');
+  });
+
+  await check('a dragon going by close is felt: the trees bend, the leaves are carried, and one in front of the sun casts its shadow', async () => {
+    const s = await app(page, async () => {
+      const d = window.__dragons;
+      const wait = (n) =>
+        new Promise((resolve) => {
+          const start = d.stage.renderer.info.render.frame;
+          const tick = () => (d.stage.renderer.info.render.frame >= start + n ? resolve() : setTimeout(tick, 8));
+          tick();
+        });
+      const blown = d.stage.leaves.material.uniforms.uBlown.value;
+      const before = [blown.x, blown.y, blown.z];
+      const calm = d.state.wake;
+      // On to a moment when one of them is within 15 m, and a few frames of it.
+      let near = Infinity;
+      for (let t = 0; t < 240 && near > 15; t += 0.25) {
+        d.fly(0.25);
+        near = Math.min(...d.director.flyers.map((f) => Math.hypot(f.x, f.y - 1.62, f.z)));
+      }
+      await wait(14);
+      d.state.paused = true;
+      await wait(14);
+      const out = { near, calm, wake: d.state.wake, wind: d.stage.shared.uWind.value.length(), moved: Math.hypot(blown.x - before[0], blown.y - before[1], blown.z - before[2]) };
+      // The maple's rattle, as a share of what a full gust gives it: what the wind has it at, times what the wake adds.
+      out.wash = d.audio.washTold;
+      out.rattle = d.audio.washTold * (0.12 + 0.88 * d.audio.wind.now * d.audio.wind.now);
+      // And one put on the line from the eye to the sun, 60 m off (the other well out of it).
+      const keep = d.director.flyers.map((f) => [f.x, f.y, f.z]);
+      const put = (f, x, y, z) => {
+        f.x = x;
+        f.y = y;
+        f.z = z;
+      };
+      const sun = d.stage.shared.uSunDir.value;
+      put(d.director.flyers[1], 200, 40, 150);
+      put(d.director.flyers[0], sun.x * 60, 1.62 + sun.y * 60, sun.z * 60);
+      await wait(12);
+      out.cover = d.state.cover;
+      out.uniform = d.stage.shared.uCover.value;
+      put(d.director.flyers[0], -200, 40, 150);
+      await wait(40);
+      out.after = d.state.cover;
+      d.director.flyers.forEach((f, i) => put(f, keep[i][0], keep[i][1], keep[i][2]));
+      d.state.paused = false;
+      return out;
+    });
+    assert.ok(s.near <= 15, 'a dragon came within ' + s.near.toFixed(1) + ' m');
+    assert.ok(s.wake > 0.5 && s.wake > s.calm + 0.3, 'its wake is felt: ' + s.wake.toFixed(2) + ' (it was ' + s.calm.toFixed(2) + ')');
+    assert.ok(s.wind > 0.9, 'the trees by the ledge bend to it: ' + s.wind.toFixed(2));
+    assert.ok(s.moved > 0.15, 'and the leaves in the air are carried along: ' + s.moved.toFixed(2) + ' m');
+    assert.ok(s.wash >= 1 && s.rattle > 0.45 && s.rattle < 1.06, 'the maple rattles as in a gust, and no louder than in a full one: ' + s.rattle.toFixed(2) + ' of that');
+    assert.ok(s.cover > 0.8 && s.uniform === s.cover, 'a dragon in front of the sun covers it: ' + s.cover.toFixed(2));
+    assert.ok(s.after < 0.05, 'and the shadow passes: ' + s.after.toFixed(2));
+    assert.deepEqual(problems, []);
   });
 
   await check('a roar comes with fire, and the fire goes out again', async () => {
@@ -305,15 +368,48 @@ async function flatScreen(browser, base) {
     assert.equal(await app(page, () => window.__dragons.state.calls), before.calls + 1, 'a tap is');
   });
 
-  await check('the sound button mutes and unmutes', async () => {
+  await check('the sound button switches the sound off (and the work of making it) and on again', async () => {
     await page.click('#soundChip');
     assert.equal(await page.getAttribute('#soundChip', 'aria-pressed'), 'false');
-    await page.waitForTimeout(400);
-    assert.ok((await app(page, () => window.__dragons.audio.master.gain.value)) < 0.01, 'silent');
+    await page.waitForTimeout(500);
+    const off = await app(page, () => ({ gain: window.__dragons.audio.master.gain.value, state: window.__dragons.audio.ctx.state, running: window.__dragons.audio.running }));
+    assert.ok(off.gain < 0.01, 'silent');
+    assert.equal(off.state, 'suspended', 'and not being worked out at all');
+    assert.equal(off.running, false);
+    // A call while it is off must not wake it.
+    await app(page, () => window.__dragons.call());
+    await page.waitForTimeout(150);
+    assert.equal(await app(page, () => window.__dragons.audio.ctx.state), 'suspended', 'a tap does not wake it');
     await page.click('#soundChip');
     assert.equal(await page.getAttribute('#soundChip', 'aria-pressed'), 'true');
-    await page.waitForTimeout(400);
-    assert.ok((await app(page, () => window.__dragons.audio.master.gain.value)) > 0.5, 'back');
+    await page.waitForTimeout(500);
+    const on = await app(page, () => ({ gain: window.__dragons.audio.master.gain.value, state: window.__dragons.audio.ctx.state }));
+    assert.equal(on.state, 'running');
+    assert.ok(on.gain > 0.5, 'back');
+  });
+
+  await check('the cheaper way of placing sound can be switched on, and off again', async () => {
+    const s = await app(page, () => {
+      const d = window.__dragons;
+      const model = () => d.audio.dragons.map((v) => v.panner.panningModel);
+      // (A page drawn in software is slow, and may have been given the cheap way already.)
+      const was = d.audio.lite;
+      d.audio.setLite(false);
+      const full = model();
+      d.audio.setLite(true);
+      const lite = model();
+      const echo = d.audio.reverbOff;
+      d.audio.setLite(false);
+      const out = { full, lite, echo, again: model(), back: d.audio.reverbOff };
+      d.audio.setLite(was);
+      return out;
+    });
+    assert.deepEqual(s.full, ['HRTF', 'HRTF']);
+    assert.deepEqual(s.lite, ['equalpower', 'equalpower']);
+    assert.equal(s.echo, true, 'no echo off the hills while it is on');
+    assert.deepEqual(s.again, ['HRTF', 'HRTF']);
+    assert.equal(s.back, false);
+    assert.deepEqual(problems, []);
   });
 
   await check('looking every way, the frame stays inside the Quest 1 budget', async () => {
@@ -409,6 +505,7 @@ async function quest1(browser, base) {
       d.controllers.left.position.set(-0.1, 0.9, 0);
       d.controllers.right.position.set(0.5, 0.9, 0);
     });
+    const loaded = await app(page, () => ({ programs: window.__dragons.stage.renderer.info.programs.length, textures: window.__dragons.stage.renderer.info.memory.textures }));
     await page.click('#enterVR');
     await page.waitForFunction(() => window.__dragons.state.vr.presenting, null, { timeout: 15000 });
     await frames(page, 6);
@@ -421,9 +518,11 @@ async function quest1(browser, base) {
         renderPath: d.xr.renderPath,
         eyes: d.stage.renderer.xr.getCamera().cameras.length,
         head: [head.x, head.y, head.z],
+        rig: [d.stage.rig.position.x, d.stage.rig.position.y, d.stage.rig.position.z],
+        placed: d.xr.placed,
         begun: d.state.begun,
         time: d.director.time,
-        hint: d.stage.hint && d.stage.hint.text,
+        hint: d.stage.hint.showing && d.stage.hint.text,
         audio: d.audio.running,
         veilGone: document.getElementById('veil').classList.contains('gone'),
         hud: !document.getElementById('hud').hidden,
@@ -433,9 +532,14 @@ async function quest1(browser, base) {
     assert.equal(s.type, 'local-floor');
     assert.equal(s.isPresenting, true);
     assert.equal(s.eyes, 2, 'both eyes are drawn');
-    near(s.head[0], 0.2, 0.02, 'head x');
+    // The person is 20 cm off the middle of their floor space: the ledge is put under them.
+    assert.equal(s.placed, true);
+    near(s.head[0], 0, 0.02, 'head x');
     near(s.head[1], 1.7, 0.02, 'head height above the ledge');
-    near(s.head[2], 0.1, 0.02, 'head z');
+    near(s.head[2], 0, 0.02, 'head z');
+    near(s.rig[0], -0.2, 0.02, 'the valley is shifted to where they stand, x');
+    near(s.rig[2], -0.1, 0.02, 'and z');
+    assert.equal(s.rig[1], 0, 'never up or down');
     assert.equal(s.begun, true);
     assert.ok(s.time < 2, 'the flight starts from its opening: ' + s.time.toFixed(2) + ' s in');
     assert.match(s.hint, /trigger/, 'the headset is told how to call');
@@ -445,6 +549,12 @@ async function quest1(browser, base) {
     assert.equal(s.quality, 0);
     assert.match(s.renderPath, /^XR(WebGLLayer|ProjectionLayer)$/);
     assert.deepEqual(problems, []);
+    // The words on the rim were made while the page loaded: showing them builds no shader
+    // and sends no picture to the graphics chip. (They once did, two seconds into every session.)
+    await page.waitForFunction(() => window.__dragons.stage.hint.mesh.visible, null, { timeout: 20000 });
+    await frames(page, 3);
+    const shown = await app(page, () => ({ programs: window.__dragons.stage.renderer.info.programs.length, textures: window.__dragons.stage.renderer.info.memory.textures }));
+    assert.deepEqual(shown, loaded, 'nothing new on the graphics chip when the hint appears');
   });
 
   await check('both eyes together stay inside the budget, whichever way the head is turned', async () => {
@@ -478,17 +588,50 @@ async function quest1(browser, base) {
   });
 
   await check('the picture follows the head: leaning moves the eye, the world stays put', async () => {
+    const before = await app(page, () => [window.__dragons.stage.rig.position.x, window.__dragons.stage.rig.position.y, window.__dragons.stage.rig.position.z, window.__dragons.stage.rig.rotation.y]);
+    // From (0.2, 1.7, 0.1) in their room: half a metre to the left, half a metre down, 30 cm back.
     await app(page, () => window.__xrDevice.position.set(-0.3, 1.2, 0.4));
     await frames(page, 4);
     const s = await app(page, () => {
       const d = window.__dragons;
       const head = d.xr.headPosition(new d.THREE.Vector3());
-      return { head: [head.x, head.y, head.z], rig: [d.stage.rig.position.x, d.stage.rig.position.y, d.stage.rig.position.z] };
+      return { head: [head.x, head.y, head.z], rig: [d.stage.rig.position.x, d.stage.rig.position.y, d.stage.rig.position.z, d.stage.rig.rotation.y] };
     });
-    near(s.head[0], -0.3, 0.02, 'head x');
+    near(s.head[0], -0.5, 0.02, 'head x');
     near(s.head[1], 1.2, 0.02, 'head y');
-    near(s.head[2], 0.4, 0.02, 'head z');
-    assert.deepEqual(s.rig, [0, 0, 0], 'the viewer is never moved by the page');
+    near(s.head[2], 0.3, 0.02, 'head z');
+    assert.deepEqual(s.rig, before, 'after the first moment the viewer is never moved by the page');
+  });
+
+  await check('one failure inside a frame does not stop the picture or the head tracking', async () => {
+    const s = await app(page, async () => {
+      const d = window.__dragons;
+      const info = d.stage.renderer.info.render;
+      const real = d.director.step;
+      // The flight throws, once, in the middle of a session.
+      d.director.step = () => {
+        d.director.step = real;
+        throw new Error('injected by the smoke test');
+      };
+      const start = info.frame;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const drawn = info.frame - start;
+      window.__xrDevice.position.set(0.4, 1.5, 0.1);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const head = d.xr.headPosition(new d.THREE.Vector3());
+      const out = { drawn, head: [head.x, head.y, head.z], failed: Object.keys(d.state.failed), presenting: d.stage.renderer.xr.isPresenting };
+      // Put it back as it was for the checks that follow.
+      window.__xrDevice.position.set(-0.3, 1.2, 0.4);
+      delete d.state.failed.flight;
+      return out;
+    });
+    assert.ok(s.drawn >= 10, 'frames drawn in the second and a half after it: ' + s.drawn);
+    assert.equal(s.presenting, true);
+    near(s.head[0], 0.2, 0.02, 'the picture still follows the head, x');
+    near(s.head[1], 1.5, 0.02, 'y');
+    assert.deepEqual(s.failed, ['flight'], 'the part that failed is switched off, and only that');
+    assert.equal(problems.filter((p) => /flight failed and has been switched off/.test(p)).length, 1, 'and it is reported, once: ' + JSON.stringify(problems));
+    problems.length = 0;
   });
 
   await check('pulling a trigger whistles and calls a dragon', async () => {
@@ -504,6 +647,48 @@ async function quest1(browser, base) {
     assert.equal(s.calls, before.calls + 1);
     assert.equal(s.jobs.filter(Boolean).length, 1, 'one dragon has turned toward the ledge');
     assert.equal(s.whistles, before.whistles + 1);
+    assert.deepEqual(problems, []);
+  });
+
+  await check('the line about the trigger comes back while nobody has called and the dragons are far off, and stops for good after a call', async () => {
+    const s = await app(page, async () => {
+      const d = window.__dragons;
+      const wait = (n) =>
+        new Promise((resolve) => {
+          const start = d.stage.renderer.info.render.frame;
+          const tick = () => (d.stage.renderer.info.render.frame >= start + n ? resolve() : setTimeout(tick, 8));
+          tick();
+        });
+      const far = () => Math.min(...d.director.flyers.map((f) => Math.hypot(f.x, f.y - 1.62, f.z))) > 85;
+      const out = { calledAlready: !d.state.hint.wanted };
+      // As if nobody had called yet, and the first showing were over.
+      d.state.hint.wanted = true;
+      d.stage.hideHint();
+      await wait(3);
+      out.waiting = !d.stage.hint.showing;
+      const shown = d.stage.hint.shown;
+      // Most of a minute goes by, to a moment when both dragons are far off.
+      d.fly(50);
+      for (let t = 0; t < 120 && !far(); t += 1) d.fly(1);
+      await wait(4);
+      out.again = d.stage.hint.showing && d.stage.hint.shown === shown + 1;
+      // A call that is answered: no more of it.
+      d.director.jobs[0] = d.director.jobs[1] = null;
+      d.director.callAt = -100;
+      out.answered = d.call() >= 0;
+      d.stage.hideHint();
+      await wait(3);
+      d.fly(50);
+      for (let t = 0; t < 120 && !far(); t += 1) d.fly(1);
+      await wait(4);
+      out.after = d.stage.hint.showing;
+      return out;
+    });
+    assert.equal(s.calledAlready, true, 'the call before this one was answered: the hint was no longer wanted');
+    assert.equal(s.waiting, true);
+    assert.equal(s.again, true, 'shown again three quarters of a minute later');
+    assert.equal(s.answered, true);
+    assert.equal(s.after, false, 'and never again once a call has been answered');
     assert.deepEqual(problems, []);
   });
 
@@ -527,18 +712,20 @@ async function quest1(browser, base) {
         said: document.getElementById('hint').textContent,
         saidShown: !document.getElementById('hint').hidden,
         hud: !document.getElementById('hud').hidden,
-        hint: !!d.stage.hint,
+        hint: d.stage.hint.showing || d.stage.hint.mesh.visible,
+        rig: [d.stage.rig.position.x, d.stage.rig.position.z, d.stage.rig.rotation.y],
         camera: [d.stage.camera.position.x, d.stage.camera.position.y, d.stage.camera.position.z],
         size: [d.stage.canvas.width, d.stage.canvas.height],
         isPresenting: d.stage.renderer.xr.isPresenting,
       };
     });
     console.log('        ' + s.last + ' (software drawing: says nothing about a headset)');
-    assert.match(s.last, /^Last VR session: \d+ frames a second on average \(the headset asks for \d+\), [\d.]+% of frames late, slowest \d+ ms, detail step \d, drawn through XR/);
+    assert.match(s.last, /^Last VR session: \d+ frames a second on average \(the headset asks for \d+\), [\d.]+% of frames late, slowest \d+ ms, detail step \d of \d \([^)]+\), drawn through XR/);
     assert.equal(s.said, s.last, 'and the line is on the page to be read');
     assert.equal(s.saidShown, true);
     assert.equal(s.hud, true);
     assert.equal(s.hint, false);
+    assert.deepEqual(s.rig, [0, 0, 0], 'the valley is back where the flat view expects it');
     assert.equal(s.isPresenting, false);
     near(s.camera[1], 1.62, 1e-6, 'the flat camera is back at standing height');
     assert.deepEqual(s.size, [1280, 720], 'the canvas is page-sized again');
@@ -557,10 +744,67 @@ async function quest1(browser, base) {
   });
   await context.close();
 
+  // Wherever the person stands in their room, and whichever way they face.
+  const away = await open(browser, base + '?governor=off', { xr: true, stereo: true, viewport: { width: 1280, height: 720 } });
+  await check('standing 2 m from the middle of their room and turned away from its "forward", they are on the ledge facing the lake', async () => {
+    await away.page.waitForFunction(() => !window.__dragons.state.vr.checking);
+    await app(away.page, () => {
+      const d = window.__xrDevice;
+      d.position.set(2.0, 1.66, 1.2);
+      // Turned 150 degrees to the left of where the headset's space points.
+      const half = (150 * Math.PI) / 360;
+      d.quaternion.set(0, Math.sin(half), 0, Math.cos(half));
+    });
+    await away.page.click('#enterVR');
+    await away.page.waitForFunction(() => window.__dragons.state.vr.presenting && window.__dragons.xr.placed, null, { timeout: 15000 });
+    await frames(away.page, 4);
+    const look = () =>
+      app(away.page, () => {
+        const d = window.__dragons;
+        const head = d.xr.headPosition(new d.THREE.Vector3());
+        const e = d.stage.renderer.xr.getCamera().cameras[0].matrixWorld.elements;
+        return {
+          head: [head.x, head.y, head.z],
+          forward: [-e[8], -e[9], -e[10]],
+          floor: d.stage.terrain.heightAt(head.x, head.z),
+          rig: [d.stage.rig.position.x, d.stage.rig.position.z, d.stage.rig.rotation.y],
+          hint: [d.stage.hint.mesh.position.x, d.stage.hint.mesh.position.z],
+        };
+      });
+    const s = await look();
+    near(s.head[0], 0, 0.03, 'the head is over the middle of the ledge, x');
+    near(s.head[2], 0, 0.03, 'z');
+    near(s.head[1], 1.66, 0.02, 'at its own height');
+    near(s.floor, 0, 0.02, 'the drawn rock is under their real floor');
+    near(s.forward[0], 0, 0.03, 'they face the lake, x');
+    near(s.forward[2], -1, 0.03, 'z');
+    assert.ok(s.hint[1] < -1 && Math.abs(s.hint[0]) < 0.1, 'and the line about the trigger is in front of them');
+    // One step the way they face: in their room that is 150 degrees round from its "forward".
+    await app(away.page, () => window.__xrDevice.position.set(2.0 - 0.5, 1.66, 1.2 + 0.866));
+    await frames(away.page, 4);
+    const t = await look();
+    near(t.head[0], 0, 0.03, 'a step forward is a step toward the lake, x');
+    near(t.head[2], -1, 0.03, 'z');
+    assert.deepEqual(t.rig, s.rig, 'the valley does not move again');
+    // The headset moves the origin of its space (the person recentres): once more.
+    await app(away.page, () => {
+      window.__dragons.xr.onReset();
+      window.__xrDevice.position.set(-1, 1.66, 0.5);
+      window.__xrDevice.quaternion.set(0, 0, 0, 1);
+    });
+    await frames(away.page, 4);
+    const u = await look();
+    near(u.head[0], 0, 0.03, 'after a recentre they are on the middle of the ledge again, x');
+    near(u.head[2], 0, 0.03, 'z');
+    near(u.forward[2], -1, 0.03, 'facing the lake');
+    assert.deepEqual(away.problems, []);
+  });
+  await away.context.close();
+
   // A headset that refuses a floor-level space, and a browser without WebXR Layers.
   const plain = await open(browser, base + '?layers=off', { xr: true, stereo: true, viewport: { width: 1280, height: 720 } });
   // And the governor itself, in the page: starve it of frames and it thins the forest.
-  await check('when frames keep coming late in VR the forest is thinned, and stays drawn', async () => {
+  await check('when frames keep coming late in VR the page does less: simpler sound first, then a thinner forest', async () => {
     await plain.page.waitForFunction(() => !window.__dragons.state.vr.checking);
     const s = await app(plain.page, () => {
       const d = window.__dragons;
@@ -568,20 +812,30 @@ async function quest1(browser, base) {
       const leaves = d.stage.leaves.geometry.instanceCount;
       // What main.js does each VR frame, with frames that take three times too long.
       let stepped = 0;
-      for (let i = 0; i < 144 * 12; i++) {
+      let seconds = 0;
+      let firstAt = 0;
+      let soundAtFirst = '';
+      for (let i = 0; i < 24 * 60; i++) {
+        seconds += 3 / 72;
         if (d.governor.frame(3 / 72, 1 / 72)) {
           stepped++;
           d.applyQuality();
+          if (!firstAt) {
+            firstAt = seconds;
+            soundAtFirst = d.audio.lite ? 'lite' : 'full';
+          }
         }
       }
       return {
-        full, leaves, stepped, level: d.governor.level, quality: d.state.quality,
+        full, leaves, stepped, firstAt, soundAtFirst, level: d.governor.level, quality: d.state.quality,
         now: d.stage.forest.reduce((a, m) => a + m.count, 0),
         leavesNow: d.stage.leaves.geometry.instanceCount,
         mirrors: d.dragons.map((x) => x.mirrorOn),
         batches: d.stage.forest.every((m) => m.count >= 1),
       };
     });
+    assert.ok(s.firstAt > 3 && s.firstAt < 9, 'the first step comes ' + s.firstAt.toFixed(1) + ' s in');
+    assert.equal(s.soundAtFirst, 'lite', 'and it is the sound that is made cheaper first');
     assert.equal(s.level, 3, 'it steps down to the last step and stops');
     assert.equal(s.quality, 3);
     assert.ok(s.now < s.full * 0.55 && s.now > s.full * 0.4, 'trees drawn: ' + s.now + ' of ' + s.full);
@@ -595,6 +849,39 @@ async function quest1(browser, base) {
     await plain.page.waitForFunction(() => window.__dragons.state.vr.presenting, null, { timeout: 15000 });
     await frames(plain.page, 4);
     assert.equal(await app(plain.page, () => window.__dragons.xr.renderPath), 'XRWebGLLayer');
+    assert.deepEqual(plain.problems, []);
+  });
+  await check('a session that could not hold its rate is remembered: the next one is drawn smaller, and the page says so', async () => {
+    // This one cannot: it is drawn in software. Twenty-odd seconds of it, which is as short as
+    // a session may be and still be judged.
+    await plain.page.waitForTimeout(23000);
+    await app(plain.page, () => window.__dragons.xr.exit());
+    await plain.page.waitForFunction(() => !window.__dragons.state.vr.presenting, null, { timeout: 10000 });
+    const s = await app(plain.page, () => {
+      const d = window.__dragons;
+      return { last: d.state.vr.last, kept: window.localStorage.getItem('two-dragons.pace'), scale: d.xr.scale, pace: d.state.pace };
+    });
+    console.log('        ' + s.last);
+    assert.match(s.last, /Next time the picture will be drawn at 0\.8 of full size/);
+    const kept = JSON.parse(s.kept);
+    assert.deepEqual({ scale: kept.scale, aa: kept.aa }, { scale: 0.8, aa: true }, 'kept in this browser');
+    assert.ok(Math.abs(Date.now() - kept.at) < 60000, 'with the day it was kept on');
+    assert.equal(s.scale, 0.8, 'and already set for the next session');
+    // The page loaded again: it starts from what was kept.
+    await plain.page.reload({ waitUntil: 'load' });
+    await plain.page.waitForFunction(() => window.__dragons && window.__dragons.ready, null, { timeout: 60000 });
+    const again = await app(plain.page, () => ({ scale: window.__dragons.xr.scale, pace: window.__dragons.state.pace, aa: window.__dragons.stage.renderer.getContextAttributes().antialias }));
+    assert.equal(again.scale, 0.8);
+    assert.equal(again.aa, true, 'anti-aliasing is the second thing to go, not the first');
+    // Two weeks on it is forgotten: a headset that had one bad day gets its full picture back.
+    await app(plain.page, () => {
+      const kept = JSON.parse(window.localStorage.getItem('two-dragons.pace'));
+      kept.at -= 15 * 86400000;
+      window.localStorage.setItem('two-dragons.pace', JSON.stringify(kept));
+    });
+    await plain.page.reload({ waitUntil: 'load' });
+    await plain.page.waitForFunction(() => window.__dragons && window.__dragons.ready, null, { timeout: 60000 });
+    assert.equal(await app(plain.page, () => window.__dragons.xr.scale), 1, 'forgotten after two weeks');
     assert.deepEqual(plain.problems, []);
   });
   await plain.context.close();

@@ -41,6 +41,9 @@ export function makeShared() {
     uTime: { value: 0 },
     // Direction and strength of the sway.
     uWind: { value: new THREE.Vector2(WIND[0], WIND[1]) },
+    // How much of the sun a dragon is covering just now, seen from the ledge (0..1): its
+    // shadow falls on the ledge and the trees by it, and the glare round the sun dims.
+    uCover: { value: 0 },
   };
 }
 
@@ -118,6 +121,7 @@ export function worldMaterial(shared, options) {
       ${COMMON}
       uniform float uHaze;
       uniform vec2 uWind;
+      uniform float uCover;
       attribute vec4 aux;
       #ifdef USE_INSTANCING
         attribute float aShade;
@@ -159,6 +163,9 @@ export function worldMaterial(shared, options) {
           // Low sun through leaves: the side away from the sun glows.
           c += albedo * uSunColor * (max(-dot(n, uSunDir), 0.0) * 0.55 * aux.y * sunlit);
         #endif
+        // A dragon between the ledge and the low sun: for that moment its shadow is on the
+        // ledge and on everything within a few strides of it.
+        c *= 1.0 - 0.42 * uCover * (1.0 - smoothstep(22.0, 42.0, length(wp.xz)));
         vColor = dvDisplay(dvHaze(c, wp.xyz, uHaze));
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
@@ -195,21 +202,34 @@ export function skyMaterial() {
   });
 }
 
-/** The sun's disc and the glare around it: added on top of whatever is there. */
-export function sunMaterial() {
+/**
+ * The sun: its disc, and the glare round it. One mesh and one draw call, in two parts told apart
+ * by `part` (0: disc, 1: glare).
+ *
+ * The disc is a thing in the sky: it is drawn at the far plane and tested against what has been
+ * drawn already, so a hill, a cloud or a dragon in front of it hides it. (Added over everything,
+ * as it once was, it showed through a dragon's wing like a hole.) The glare is not a thing: it
+ * is light scattered on the way to the eye, so it is drawn in front of everything, and it dims
+ * while a dragon covers the disc (uCover).
+ */
+export function sunMaterial(shared) {
   return new THREE.ShaderMaterial({
+    uniforms: { uCover: shared.uCover },
     vertexColors: true,
     transparent: true,
     depthWrite: false,
-    depthTest: false,
+    depthTest: true,
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
+      uniform float uCover;
+      attribute float part;
       varying vec3 vColor;
       void main() {
-        vColor = color;
+        vColor = color * mix(1.0, 1.0 - 0.7 * uCover, part);
         vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0);
-        gl_Position = p.xyww;
+        // The disc at the far plane, the glare just inside the near one.
+        gl_Position = vec4(p.xy, mix(p.w, -0.999 * p.w, part), p.w);
       }
     `,
     fragmentShader: FLAT_FRAGMENT,
@@ -288,6 +308,10 @@ export function leafMaterial(shared, box) {
         // Steady, whatever the gusts do: a leaf's place is worked out from the time alone, and
         // a wind that changed strength would move every leaf at once.
         uDrift: { value: new THREE.Vector2(WIND[0], WIND[1]) },
+        // How far the wakes of passing dragons have carried the leaves so far (metres). It
+        // only ever grows, a little at a time (scene.js, blowLeaves): a leaf that leaves the
+        // box on one side comes in on the other, so it never needs to come back.
+        uBlown: { value: new THREE.Vector3(0, 0, 0) },
       },
       shared
     ),
@@ -297,6 +321,7 @@ export function leafMaterial(shared, box) {
       uniform vec3 uBoxMin;
       uniform vec3 uBoxSize;
       uniform vec2 uDrift;
+      uniform vec3 uBlown;
       attribute vec4 aSeed;
       attribute vec4 aLeaf;
       varying vec3 vColor;
@@ -315,6 +340,8 @@ export function leafMaterial(shared, box) {
         vec3 q = aSeed.xyz * uBoxSize;
         q.y -= uTime * (0.55 + 0.5 * r3);
         q.xz += uDrift * (uTime * (0.9 + 0.7 * r4));
+        // Light leaves are carried further by a wake than heavy ones.
+        q += uBlown * (0.55 + 0.9 * r3);
         q.x += sin(swing) * 0.32;
         q.z += cos(swing * 0.83 + 1.7) * 0.26;
         q.y += 0.07 * cos(2.0 * swing);
@@ -397,9 +424,10 @@ export function dragonMaterial(shared, bones, options) {
         #ifdef DV_MIRROR
           c *= 0.55;
         #endif
-        // A little less haze than the land gets: down in the mist of the valley floor the
-        // dragons are what the eye is looking for, and they must not sink into it.
-        vColor = dvDisplay(dvHaze(c, wp.xyz, 0.72));
+        // Less haze than the land gets (six tenths of it): down in the mist of the valley
+        // floor the dragons are what the eye is looking for, and they must not sink into it.
+        // (Measured, with and without each dragon in the picture: see the README.)
+        vColor = dvDisplay(dvHaze(c, wp.xyz, 0.6));
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
     `,

@@ -35,12 +35,13 @@ const KINDS = {
   oak2: { leaves: [LEAF.bronze, LEAF.russet, LEAF.orange], bark: 'oak', trunk: 0.36, crownFrom: 0.34, lumps: 6, lean: [0, 0], detail: 1, wide: 1.1 },
   birch: { leaves: [LEAF.yellow, LEAF.gold, LEAF.yellow], bark: 'birch', trunk: 0.2, crownFrom: 0.55, lumps: 6, lean: [-0.3, -0.2], detail: 1, airy: true },
   birch2: { leaves: [LEAF.gold, LEAF.yellow, LEAF.olive], bark: 'birch', trunk: 0.2, crownFrom: 0.6, lumps: 5, lean: [0.2, 0], detail: 1, airy: true },
-  // The big trees by the creek (world.GROVE): the same build, twice the size. Those on the far
-  // bank are twice as far off and get a third of the triangles.
+  // The big trees by the creek (world.GROVE): the same build, twice the size. The two nearest
+  // the lake, which the dragons are watched going behind, get the triangles; the rest are
+  // 90 m off and more, and are built as coarsely as the forest is.
   elderMaple: { leaves: [LEAF.flame, LEAF.orange, LEAF.scarlet, LEAF.orange], bark: 'maple', trunk: 0.62, crownFrom: 0.5, lumps: 7, lean: [0, 0], detail: 1 },
   elderGold: { leaves: [LEAF.gold, LEAF.yellow, LEAF.orange, LEAF.gold], bark: 'maple', trunk: 0.58, crownFrom: 0.5, lumps: 7, lean: [0, 0], detail: 1 },
-  elderOak: { leaves: [LEAF.russet, LEAF.bronze, LEAF.burgundy, LEAF.russet], bark: 'oak', trunk: 0.7, crownFrom: 0.5, lumps: 7, lean: [0, 0], detail: 1, wide: 1.1 },
-  elderMaple2: { leaves: [LEAF.scarlet, LEAF.flame, LEAF.orange], bark: 'maple', trunk: 0.6, crownFrom: 0.5, lumps: 6, lean: [0, 0], detail: 1 },
+  elderOak: { leaves: [LEAF.russet, LEAF.bronze, LEAF.burgundy, LEAF.russet], bark: 'oak', trunk: 0.7, crownFrom: 0.5, lumps: 8, lean: [0, 0], detail: 0, wide: 1.1, sides: 5 },
+  elderMaple2: { leaves: [LEAF.scarlet, LEAF.flame, LEAF.orange], bark: 'maple', trunk: 0.6, crownFrom: 0.5, lumps: 7, lean: [0, 0], detail: 0, sides: 5 },
   farGold: { leaves: [LEAF.yellow, LEAF.gold, LEAF.orange], bark: 'maple', trunk: 0.55, crownFrom: 0.5, lumps: 6, lean: [0, 0], detail: 0, boughs: false, sides: 4 },
   farMaple: { leaves: [LEAF.orange, LEAF.flame, LEAF.gold], bark: 'maple', trunk: 0.55, crownFrom: 0.5, lumps: 6, lean: [0, 0], detail: 0, boughs: false, sides: 4 },
 };
