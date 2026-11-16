@@ -213,18 +213,20 @@ is bad at (pixels, draw calls) and leans on what it has to spare (vertices):
 Measured by `npm run perf` over four minutes of flight with the head turned every way, both eyes
 of an emulated Quest 1 together:
 
-| | draw calls | triangles | version 1 |
+| | draw calls | triangles | version 1, as it was live |
 |---|---|---|---|
-| mean | 36 to 43 | 67,000 to 72,000 | 34 to 40; 57,000 to 63,000 |
-| worst frame | 52 (26 an eye) | 82,000 (41,000 an eye) | 50; 76,000 |
-| everything at once, nothing culled | 37 an eye | 45,000 an eye | 35; 40,000 |
+| mean | 36 to 43 | 67,000 to 72,000 | 33 to 38; 54,000 to 58,000 |
+| worst frame | 52 (26 an eye) | 82,000 (41,000 an eye) | 48; 69,000 |
+| everything at once, nothing culled | 37 an eye | 45,000 an eye | 34; 37,000 |
 
-So the whole of version 2 is two draw calls an eye (the mist, and what hangs in the air) and
-about 5,400 triangles: the far ranges, the moon and stars, the shafts of light, the specks in
-the air, and the glow of the fire. The brief's limit was 150 draw calls. Three textures and
-fourteen shader programs (there were twelve), all of them made while the page loads, the line of
-words shown in the headset included, so that neither the first roar nor the first seconds of a
-session cost a dropped frame.
+Of that difference, one draw call an eye and 2,500 triangles are the big trees by the creek and
+the line of words in the headset, which came between the two versions. The look itself is two
+draw calls an eye (the mist, and what hangs in the air) and about 5,400 triangles: the far
+ranges, the moon and stars, the shafts of light, the specks in the air, and the glow of the
+fire. The brief's limit was 150 draw calls. Three textures and fourteen shader programs (version
+1 had two and eleven), all of them made while the page loads, the line of words shown in the
+headset included, so that neither the first roar nor the first seconds of a session cost a
+dropped frame.
 
 How much of one eye's picture each see-through thing is blended into, drawn alone and counted,
 at most (looking the worst way) and on average over every way a head can face:
