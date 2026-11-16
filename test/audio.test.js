@@ -146,7 +146,9 @@ test('each step does less than the one before, and the first costs the processor
     assert.ok(QUALITY[i].leaves < QUALITY[i - 1].leaves);
     assert.equal(QUALITY[i].sound, 'lite', 'the cheaper sound from the first step on');
   }
-  assert.deepEqual(QUALITY[0], { forest: 1, leaves: 1, mirror: true, sound: 'full' });
+  assert.deepEqual(QUALITY[0], { forest: 1, leaves: 1, mirror: true, sound: 'full', air: 1 });
+  for (let i = 1; i < QUALITY.length; i++) assert.ok(QUALITY[i].air < QUALITY[i - 1].air, 'the see-through things thin at every step');
+  assert.equal(QUALITY[QUALITY.length - 1].air, 0, 'and are gone at the last');
   assert.ok(QUALITY[QUALITY.length - 1].forest >= 0.4, 'the valley is still a forest at the last step');
   assert.equal(QUALITY_WORDS.length, QUALITY.length, 'every step can be put into words');
   assert.ok(new Governor().frame(NaN, 1 / 72) === false);

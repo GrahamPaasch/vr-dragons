@@ -10,7 +10,7 @@
  */
 
 import {
-  THREE, WIND, makeShared, worldMaterial, skyMaterial, sunMaterial, waterMaterial, leafMaterial, mistMaterial,
+  THREE, WIND, makeShared, worldMaterial, skyMaterial, sunMaterial, waterMaterial, leafMaterial, mistMaterial, moteMaterial,
 } from './shaders.js';
 import * as W from './world.js';
 import { buildTerrain } from './terrain.js';
@@ -26,6 +26,13 @@ export const WORLD_SEED = 20261115;
 /** How many leaves are in the air around the ledge, and the box they fall through (metres). */
 const LEAF_COUNT = 190;
 export const LEAF_BOX = { min: [-10.5, -7, -11.5], size: [20, 19, 19] };
+
+/**
+ * What hangs in the air and catches the light (see moteMaterial): how many of each, and the
+ * box round the viewer they are in (metres). These are caps: there are never more.
+ */
+export const MOTES = { motes: 150, sparks: 48, ash: 42 };
+export const MOTE_BOX = { min: [-9, -4.5, -12], size: [18, 12.5, 17] };
 
 /** The one line of words shown in the headset, on the rim of the ledge. */
 const HINT_TEXT = 'Pull the trigger to call a dragon';
@@ -120,6 +127,7 @@ export class Stage {
     await step('ledge', '', () => this.buildLedge());
     await step('grove', '', () => this.buildGrove());
     await step('leaves', '', () => this.buildLeaves(o.leaves === undefined ? LEAF_COUNT : o.leaves));
+    await step('motes', '', () => this.buildMotes());
     await step('hint', '', () => this.buildHint(HINT_TEXT));
     this.built = true;
   }
@@ -315,6 +323,7 @@ export class Stage {
       }
     }
     this.rayTriangles = rays;
+    const solid = sunIdx.length - rays * 3; // how much of the mesh is the sun itself
     const sg = new THREE.BufferGeometry();
     sg.setAttribute('position', new THREE.Float32BufferAttribute(sunPos, 3));
     sg.setAttribute('color', new THREE.Float32BufferAttribute(sunCol, 3));
@@ -324,6 +333,8 @@ export class Stage {
     const sun = new THREE.Mesh(sg, sunMaterial(this.shared));
     sun.frustumCulled = false;
     sun.renderOrder = 200;
+    sun.userData.all = sunIdx.length;
+    sun.userData.solid = solid;
     this.scene.add(sun);
     this.sun = sun;
   }
@@ -715,6 +726,46 @@ export class Stage {
     this.leaves = mesh;
   }
 
+  /** Motes, sparks and ash in the air round the ledge: one instanced draw call (see moteMaterial). */
+  buildMotes() {
+    const rng = makeRng(WORLD_SEED + 1313);
+    const count = MOTES.motes + MOTES.sparks + MOTES.ash;
+    const g = new THREE.InstancedBufferGeometry();
+    // A square that faces the eye; the pixel shader makes a soft round dot of it.
+    g.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0], 3));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    const seed = new Float32Array(count * 4);
+    const kind = new Float32Array(count);
+    // Mixed through one another, so that drawing any fraction of them (see setAirFraction)
+    // leaves the same proportions.
+    const kinds = [];
+    for (let i = 0; i < MOTES.motes; i++) kinds.push(0);
+    for (let i = 0; i < MOTES.sparks; i++) kinds.push(1);
+    for (let i = 0; i < MOTES.ash; i++) kinds.push(2);
+    for (let i = count - 1; i > 0; i--) {
+      const j = rng.int(i + 1);
+      const k = kinds[i];
+      kinds[i] = kinds[j];
+      kinds[j] = k;
+    }
+    for (let i = 0; i < count; i++) {
+      seed[i * 4] = rng();
+      seed[i * 4 + 1] = rng();
+      seed[i * 4 + 2] = rng();
+      seed[i * 4 + 3] = rng();
+      kind[i] = kinds[i];
+    }
+    g.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 4));
+    g.setAttribute('aKind', new THREE.InstancedBufferAttribute(kind, 1));
+    g.instanceCount = count;
+    const mesh = new THREE.Mesh(g, moteMaterial(this.shared, MOTE_BOX));
+    mesh.frustumCulled = false; // they are all round the viewer
+    mesh.renderOrder = 80; // over everything solid, the lake, the mist and the fire
+    mesh.userData.full = count;
+    this.scene.add(mesh);
+    this.motes = mesh;
+  }
+
   /**
    * Words in the world, for the headset (where there is no page to read): a line of text that
    * stands over the rim of the ledge in front of the viewer, fades in, and fades out again.
@@ -787,6 +838,32 @@ export class Stage {
     if (h.age > h.seconds) this.hideHint();
   }
 
+  /**
+   * How much of what is in the air is drawn, 0..1: the motes, sparks and ash, the shafts of
+   * sunlight, and the mist on the lake. They are the see-through things, which cost a headset
+   * pixels; everything solid is drawn regardless.
+   */
+  setAirFraction(fraction) {
+    const f = Math.min(Math.max(fraction, 0), 1);
+    this.airFraction = f;
+    if (this.motes) {
+      this.motes.geometry.instanceCount = Math.round(this.motes.userData.full * f);
+      this.motes.visible = this.motes.geometry.instanceCount > 0;
+    }
+    this.shared.uRays.value = Math.min(f * 1.6, 1);
+    // (With no shafts at all, their triangles are left out of the sun's mesh too.)
+    if (this.sun) this.sun.geometry.setDrawRange(0, f > 0.05 ? this.sun.userData.all : this.sun.userData.solid);
+    if (this.mist) {
+      this.mist.material.uniforms.uAmount.value = f;
+      this.mist.visible = f > 0.05;
+    }
+  }
+
+  /** How many of the sparks in the air are alight, 0..1 (more for a while after fire). */
+  setEmber(amount) {
+    if (this.motes) this.motes.material.uniforms.uEmber.value = amount;
+  }
+
   /** Draw only this fraction of the leaves in the air. */
   setLeafFraction(fraction) {
     if (this.leaves) this.leaves.geometry.instanceCount = Math.max(0, Math.round(this.leaves.userData.full * fraction));
@@ -837,6 +914,8 @@ export class Stage {
     blown.x += dx;
     blown.y += dy;
     blown.z += dz;
+    // What hangs in the air goes with them.
+    if (this.motes) this.motes.material.uniforms.uBlown.value.copy(blown);
   }
 
   render() {

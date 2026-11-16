@@ -14,16 +14,26 @@
  * what the next one should start with, and the page remembers that.
  */
 
-/** What is drawn and heard at each step. Step 0 is everything. */
+/**
+ * What is drawn and heard at each step. Step 0 is everything. `air` is the see-through things
+ * (the motes and sparks, the shafts of sunlight, the mist on the lake): they are what costs a
+ * headset pixels rather than triangles, so they thin from the first step and are gone by the
+ * last.
+ */
 export const QUALITY = [
-  { forest: 1, leaves: 1, mirror: true, sound: 'full' },
-  { forest: 0.8, leaves: 0.7, mirror: true, sound: 'lite' },
-  { forest: 0.62, leaves: 0.45, mirror: false, sound: 'lite' },
-  { forest: 0.45, leaves: 0.25, mirror: false, sound: 'lite' },
+  { forest: 1, leaves: 1, mirror: true, sound: 'full', air: 1 },
+  { forest: 0.8, leaves: 0.7, mirror: true, sound: 'lite', air: 0.6 },
+  { forest: 0.62, leaves: 0.45, mirror: false, sound: 'lite', air: 0.3 },
+  { forest: 0.45, leaves: 0.25, mirror: false, sound: 'lite', air: 0 },
 ];
 
 /** What each step gave up, in words, for the line about how a session went. */
-export const QUALITY_WORDS = ['everything drawn', 'simpler sound, a fifth of the forest left out', 'two fifths of the forest and the dragons’ mirror images left out', 'more than half the forest left out'];
+export const QUALITY_WORDS = [
+  'everything drawn',
+  'simpler sound, a fifth of the forest left out, thinner mist and fewer motes',
+  'two fifths of the forest and the dragons’ mirror images left out, little mist',
+  'more than half the forest left out, and no mist, motes or shafts of sunlight',
+];
 
 /** Seconds per judgement. (A length of time, not a number of frames: a headset at half rate must not be given twice as long.) */
 const WINDOW = 2;

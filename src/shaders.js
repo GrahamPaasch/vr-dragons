@@ -470,13 +470,126 @@ export function leafMaterial(shared, box) {
         vec4 wp = vec4(center + p * (aLeaf.w * show), 1.0);
         // Thin enough for the low sun to shine through: lit from either side.
         float sun = 0.3 + 0.7 * abs(dot(n, uSunDir));
-        vec3 c = aLeaf.rgb * (mix(uBounceColor, uSkyColor, n.y * 0.5 + 0.5) + uSunColor * (sun * 0.85));
+        vec3 c = aLeaf.rgb * (mix(uBounceColor, uSkyColor, n.y * 0.5 + 0.5) + uSunColor * (sun * 0.7));
+        // And they catch the light as they come down: one that falls between the eye and the
+        // sun is lit through, like a scrap of stained glass, and one that turns its face
+        // just so throws the sun at the eye for an instant.
+        vec3 toEye = normalize(cameraPosition - wp.xyz);
+        float into = max(-dot(toEye, uSunDir), 0.0);
+        c += aLeaf.rgb * uSunColor * (into * into * into * (0.5 + 0.9 * sun));
+        float flash = abs(dot(n, normalize(uSunDir + toEye)));
+        flash *= flash;
+        flash *= flash;
+        flash *= flash;
+        flash *= flash;
+        c += uSunColor * (flash * flash * 0.55);
         vec4 vp = viewMatrix * wp;
         vColor = dvDisplay(dvHaze(c, wp.xyz, 1.0)) * dvVignette(vp.xyz);
         gl_Position = projectionMatrix * vp;
       }
     `,
     fragmentShader: FLAT_FRAGMENT,
+  });
+}
+
+/**
+ * What hangs in the air round the ledge and catches the light: motes of pollen and dust, sparks
+ * from the dragons' fire, and flakes of ash. One instanced draw call of small squares that
+ * face the eye, each drawn as a soft round dot and ADDED to the picture (they are light, or
+ * lit); where each one is, is worked out from the time alone, in a box round the viewer, as
+ * the leaves are. There are few of them and they are small: on the screen all of them
+ * together cover less than a hundredth of it.
+ *
+ *   aSeed  x, y, z: place in the box (0..1); w: a random number that sets everything else
+ *   aKind  0 a mote, 1 a spark, 2 a flake of ash
+ *
+ * A mote is all but unseen until one looks toward the sun through it: then the air is full of
+ * them. Sparks glow of themselves, rise, flicker and die; how many are alight is uEmber (more
+ * for a while after a dragon has breathed fire). Ash drifts down, pale where it is lit.
+ */
+export function moteMaterial(shared, box) {
+  return new THREE.ShaderMaterial({
+    uniforms: Object.assign(
+      {
+        uBoxMin: { value: new THREE.Vector3(box.min[0], box.min[1], box.min[2]) },
+        uBoxSize: { value: new THREE.Vector3(box.size[0], box.size[1], box.size[2]) },
+        uDrift: { value: new THREE.Vector2(WIND[0], WIND[1]) },
+        // The wakes of passing dragons carry them as they carry the leaves.
+        uBlown: { value: new THREE.Vector3(0, 0, 0) },
+        uEmber: { value: 0.4 },
+      },
+      shared
+    ),
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      ${COMMON}
+      uniform vec3 uBoxMin;
+      uniform vec3 uBoxSize;
+      uniform vec2 uDrift;
+      uniform vec3 uBlown;
+      uniform float uEmber;
+      attribute vec4 aSeed;
+      attribute float aKind;
+      varying vec3 vColor;
+      varying vec2 vUv;
+      void main() {
+        float r1 = aSeed.w;
+        float r2 = fract(r1 * 7.31);
+        float r3 = fract(r1 * 13.7);
+        float r4 = fract(r1 * 29.3);
+        float spark = step(0.5, aKind) * step(aKind, 1.5);
+        float ash = step(1.5, aKind);
+        float t = uTime;
+        // Motes hang, and drift a little with the wind; sparks go up on their own heat and
+        // are carried along; ash comes down.
+        vec3 go = vec3(uDrift.x * 0.3, 0.02 + 0.04 * r2, uDrift.y * 0.3);
+        go = mix(go, vec3(uDrift.x * 0.8, 0.55 + 0.7 * r3, uDrift.y * 0.8), spark);
+        go = mix(go, vec3(uDrift.x * 0.55, -0.22 - 0.2 * r3, uDrift.y * 0.55), ash);
+        vec3 q = aSeed.xyz * uBoxSize + go * t + uBlown * (0.35 + 0.65 * r3);
+        // Each wanders about its path.
+        float w = t * (0.35 + 0.5 * r2) + r1 * 6.2832;
+        q += vec3(sin(w), 0.6 * sin(w * 1.31 + 1.0), cos(w * 0.83 + 2.0)) * mix(0.22, 0.5, spark);
+        q = mod(q, uBoxSize);
+        vec3 center = uBoxMin + q;
+        vec3 rim = min(q, uBoxSize - q);
+        float show = smoothstep(0.0, 1.4, min(rim.x, min(rim.y, rim.z)));
+        vec3 toP = center - cameraPosition;
+        float dist = length(toP);
+        vec3 dir = toP / max(dist, 1.0e-4);
+        // None in the viewer's face.
+        show *= smoothstep(0.45, 1.3, dist);
+        float into = max(dot(dir, uSunDir), 0.0);
+        float twinkle = 0.5 + 0.5 * sin(t * (1.1 + 2.4 * r4) + r1 * 40.0);
+        // A mote: seen by the sun it scatters toward the eye.
+        vec3 c = vec3(1.0, 0.7, 0.34) * ((0.07 + 0.93 * into * into * into) * (0.3 + 0.7 * twinkle * twinkle));
+        // A spark: bright and yellow low down where it was made, red and dying as it rises.
+        float life = q.y / uBoxSize.y;
+        float flicker = 0.62 + 0.38 * sin(t * (8.0 + 7.0 * r2) + r1 * 50.0);
+        vec3 glow = mix(vec3(1.0, 0.5, 0.1), vec3(0.85, 0.1, 0.02), life) * (flicker * (1.0 - life * life) * 1.5 * step(r4, uEmber));
+        c = mix(c, glow, spark);
+        // Ash: pale where the sun finds it.
+        c = mix(c, vec3(0.8, 0.62, 0.5) * ((0.1 + 0.55 * into * into) * (0.45 + 0.55 * twinkle)), ash);
+        float size = mix(0.015 + 0.014 * r2, 0.024 + 0.022 * r2, spark);
+        size = mix(size, 0.014 + 0.012 * r2, ash);
+        // (A little bigger far off, or they would be less than a pixel of a Quest 1.)
+        size *= show * (1.0 + 0.07 * dist);
+        vec4 vp = viewMatrix * vec4(center, 1.0);
+        vp.xy += position.xy * size;
+        vUv = position.xy;
+        vColor = c * dvVignette(vp.xyz);
+        gl_Position = projectionMatrix * vp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      varying vec3 vColor;
+      varying vec2 vUv;
+      void main() {
+        float a = max(1.0 - dot(vUv, vUv), 0.0);
+        gl_FragColor = vec4(vColor * (a * a), 1.0);
+      }
+    `,
   });
 }
 

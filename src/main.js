@@ -30,6 +30,9 @@ import { XRControl } from './xr.js';
 import { Governor, QUALITY, QUALITY_WORDS, nextSession } from './governor.js';
 import { SUN_DIR } from './world.js';
 
+/** How many of the sparks in the air are alight when no dragon has breathed fire for a while (0..1). */
+const EMBER_REST = 0.35;
+
 const params = new URLSearchParams(location.search);
 const number = (name) => {
   const v = params.get(name);
@@ -51,6 +54,7 @@ const state = {
   wind: 0.5, // how hard the wind is blowing, 0..1, as the trees show it
   wake: 0, // how hard the wake of a dragon going by is felt on the ledge, 0..1
   cover: 0, // how much of the sun a dragon is covering, seen from the ledge, 0..1
+  ember: EMBER_REST, // how many of the sparks in the air are alight, 0..1
   nearest: Infinity, // how far the nearer dragon is from the viewer's head (metres)
   calls: 0,
   answered: 0,
@@ -303,6 +307,7 @@ function surroundings(dt) {
   const flyers = director.flyers;
   let wake = 0;
   let cover = 0;
+  let fire = 0;
   let nearest = Infinity;
   let gx = 0;
   let gy = 0;
@@ -321,6 +326,9 @@ function surroundings(dt) {
     gx += w * (5.5 * flat * Math.sin(f.heading));
     gy += w * -1.6;
     gz += w * (5.5 * flat * Math.cos(f.heading));
+    // Fire puts sparks in the air: all of them alight after a breath close by, fewer after
+    // one far off.
+    if (dragons[i].fire > 0.2) fire = Math.max(fire, Math.min(Math.max(1.25 - d / 200, 0.45), 1));
     // Covering the sun: how near the line from the head to the sun its body is, against how
     // wide it looks from here. (Wings and all it is about 9 m across in the mean.)
     const along = (dx * SUN_DIR[0] + dy * SUN_DIR[1] + dz * SUN_DIR[2]) / d;
@@ -341,6 +349,10 @@ function surroundings(dt) {
   gust[2] += (gz - gust[2]) * ease;
   if (!state.paused) stage.blowLeaves(gust[0] * dt, gust[1] * dt, gust[2] * dt);
   stage.setCover(state.cover);
+  // Quick to catch, slow to die down.
+  const sparks = Math.max(fire, EMBER_REST);
+  state.ember += (sparks - state.ember) * (1 - Math.exp(-dt / (sparks > state.ember ? 0.7 : 20)));
+  stage.setEmber(state.ember);
   // The trees sway with the wind that is heard (without sound the gusts come and go by the
   // clock), and with the wake of a dragon going by close.
   const blowing = audio.running && !soundFailed ? audio.gust : 0.5 + 0.3 * Math.sin(state.time * 0.23) + 0.2 * Math.sin(state.time * 0.61 + 1.3);
@@ -464,6 +476,7 @@ function applyQuality() {
   const trees = number('trees');
   stage.setForestFraction(q.forest * (trees === undefined ? 1 : Math.min(Math.max(trees, 0.05), 1)));
   stage.setLeafFraction(q.leaves);
+  stage.setAirFraction(q.air);
   for (const d of dragons) d.mirrorOn = q.mirror;
   sound(() => audio.setLite(q.sound === 'lite' || params.get('sound') === 'lite'));
 }
