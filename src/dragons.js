@@ -67,7 +67,7 @@ export class DragonView {
     this.flip = new THREE.Matrix4().set(1, 0, 0, 0, 0, -1, 0, 2 * W.LAKE_LEVEL, 0, 0, 1, 0, 0, 0, 0, 1);
     this.sunlit = 1;
 
-    // Its fire: one more draw call, and only while it is breathing.
+    // Its fire, and the glow round the fire: one more draw call, and only while it is breathing.
     const fire = buildFlame(spec.build);
     // (The fire lights the dragon's own face: the materials are told where the mouth is.)
     for (const material of [this.material, this.mirrorMaterial]) material.uniforms.uMouth.value.set(fire.mouth[0], fire.mouth[1], fire.mouth[2], this.scale);
@@ -75,6 +75,7 @@ export class DragonView {
     fg.setAttribute('position', new THREE.BufferAttribute(fire.position, 3));
     fg.setAttribute('dir', new THREE.BufferAttribute(fire.dir, 3));
     fg.setAttribute('flame', new THREE.BufferAttribute(fire.flame, 3));
+    fg.setAttribute('glow', new THREE.BufferAttribute(fire.glow, 4));
     fg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 4 * this.scale), 16 * this.scale);
     this.flameMaterial = flameMaterial(stage.shared, fire.length);
     this.flame = new THREE.Mesh(fg, this.flameMaterial);

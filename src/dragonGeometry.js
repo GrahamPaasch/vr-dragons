@@ -260,7 +260,17 @@ export function buildDragon(build, colors) {
  *
  * Per vertex: position (where it sits at the mouth), dir (the way its tongue points, unit), and
  * flame = [how far along the tongue (0 at the mouth, up to 1 at the tip), phase, speed].
- * Returns { position, dir, flame, vertices, triangles, length (metres, for the big dragon 9.5) }.
+ *
+ * And the glow of it: fire is far brighter than a screen can show, and what the eye (or a lens)
+ * makes of that is light spilling round it. So three soft discs of added light ride on the
+ * jet, each turned to face the eye by the shader: a small hot one at the mouth, a wider one
+ * part of the way along, and a wide dim one round all of it, which is the haze lit up. A disc
+ * is a fan: bright in the middle, a ring a little way out, and nothing at the rim. Its
+ * vertices carry glow = [x, y (across the disc, the rim at 1), radius in metres, brightness],
+ * and flame.x says how far along the jet its middle rides. For the tongues glow is all zero.
+ *
+ * Returns { position, dir, flame, glow, vertices, triangles, tongues (how many of the triangles
+ * are tongues: they come first), length (metres: 9.5 for a dragon of size 1), mouth }.
  */
 export function buildFlame(build) {
   const b = Object.assign({ scale: 1, neck: 1 }, build || {});
@@ -301,16 +311,62 @@ export function buildFlame(build) {
       }
     }
   }
+  const tongueTriangles = position.length / 9;
+  const glow = new Array((position.length / 3) * 4).fill(0);
+  // The glow. [how far along the jet, radius (metres at size 1), brightness]
+  const axis = [0, -0.1 / Math.hypot(0.1, 1), 1 / Math.hypot(0.1, 1)]; // the middle of the cone of tongues
+  const SPOKES = 12;
+  const RING = 0.42; // where the inner ring sits, and how bright it is there (the middle is 1)
+  const RING_LEVEL = 0.34;
+  for (const [along, radius, bright] of FLAME_GLOW) {
+    const corner = (x, y, level) => {
+      position.push(mouth[0], mouth[1], mouth[2]);
+      dir.push(axis[0], axis[1], axis[2]);
+      flame.push(along, 0, 0);
+      glow.push(x, y, radius * s, bright * level);
+    };
+    for (let k = 0; k < SPOKES; k++) {
+      const a0 = (k / SPOKES) * Math.PI * 2;
+      const a1 = ((k + 1) / SPOKES) * Math.PI * 2;
+      const c0 = Math.cos(a0);
+      const s0 = Math.sin(a0);
+      const c1 = Math.cos(a1);
+      const s1 = Math.sin(a1);
+      // Middle to ring, then ring to rim.
+      corner(0, 0, 1);
+      corner(c0 * RING, s0 * RING, RING_LEVEL);
+      corner(c1 * RING, s1 * RING, RING_LEVEL);
+      corner(c0 * RING, s0 * RING, RING_LEVEL);
+      corner(c0, s0, 0);
+      corner(c1, s1, 0);
+      corner(c0 * RING, s0 * RING, RING_LEVEL);
+      corner(c1, s1, 0);
+      corner(c1 * RING, s1 * RING, RING_LEVEL);
+    }
+  }
   return {
     position: new Float32Array(position),
     dir: new Float32Array(dir),
     flame: new Float32Array(flame),
+    glow: new Float32Array(glow),
     vertices: position.length / 3,
     triangles: position.length / 9,
+    tongues: tongueTriangles,
     length: 9.5 * s,
     mouth,
   };
 }
+
+/**
+ * The three discs of the fire's glow: [how far along the jet its middle rides (0 the mouth, 1
+ * the far end), radius in metres for a dragon of size 1, how bright its middle is (added to
+ * the picture, 0..1)].
+ */
+export const FLAME_GLOW = [
+  [0.06, 1.5, 0.62],
+  [0.42, 3.2, 0.36],
+  [0.3, 6.6, 0.19],
+];
 
 /** The two dragons of this piece. Colours are sRGB here and converted by the caller. */
 export const DRAGONS = [

@@ -697,6 +697,12 @@ export function dragonMaterial(shared, bones, options) {
  * Fire. Added on top of the picture (it is light, not a thing), drawn from both sides. Each
  * tongue shoots out from the mouth, thins, lifts a little and fades, over and over, each on its
  * own clock. uPower (0..1) is how hard the dragon is breathing: it sets length and brightness.
+ *
+ * The same mesh carries the glow round the fire (dragonGeometry.js, buildFlame): discs of
+ * added light that ride on the jet and are turned to face the eye here. They are what a camera
+ * would call bloom, and they cost one interpolated colour a pixel like everything else. They
+ * are drawn where the fire is, so the dragon's own head stands dark against them, and they
+ * never fill much of the picture: a disc is no bigger than a fifth of its distance from the eye.
  */
 export function flameMaterial(shared, length) {
   return new THREE.ShaderMaterial({
@@ -716,9 +722,11 @@ export function flameMaterial(shared, length) {
       uniform float uLength;
       attribute vec3 dir;
       attribute vec3 flame;
+      attribute vec4 glow;
       varying vec4 vFlame;
       void main() {
         float along = flame.x;
+        float halo = step(1.0e-4, glow.z);
         // 0 as the tongue leaves the mouth .. 1 as it dies.
         float cycle = fract(uTime * (1.5 + 1.7 * flame.z) + flame.y);
         float reach = uLength * uPower * (0.3 + 0.7 * cycle);
@@ -728,9 +736,11 @@ export function flameMaterial(shared, length) {
         float lick = sin(uTime * 19.0 + flame.y * 40.0) * 0.05 * reach * far;
         p.x += lick;
         p.y += 0.6 * lick + 0.13 * reach * far * far; // fire rises
+        // (A disc of the glow rides at its place along the jet, and does none of that.)
+        p = mix(p, position + dir * (uLength * uPower * along), halo);
         vec4 wp = modelMatrix * vec4(p, 1.0);
         // Yellow-white at the mouth, orange in the middle, red where it dies.
-        float t = clamp(along * 1.3, 0.0, 1.0) * (0.45 + 0.55 * cycle);
+        float t = clamp(along * 1.3, 0.0, 1.0) * mix(0.45 + 0.55 * cycle, 1.0, halo);
         vec3 c = mix(vec3(1.0, 0.86, 0.42), vec3(1.0, 0.36, 0.03), smoothstep(0.0, 0.4, t));
         c = mix(c, vec3(0.72, 0.07, 0.02), smoothstep(0.4, 1.0, t));
         float fade = uPower * (1.0 - 0.9 * cycle * cycle);
@@ -739,8 +749,17 @@ export function flameMaterial(shared, length) {
         float dist = length(toP);
         float haze = dvFogAmount(cameraPosition.y, toP.y / max(dist, 1.0e-4), dist);
         float a = fade * (1.0 - 0.5 * haze);
-        vFlame = vec4(c * (a * 1.15), a * 0.8);
-        gl_Position = projectionMatrix * viewMatrix * wp;
+        vFlame = vec4(c * (a * 1.3), a * 0.8);
+        vec4 vp = viewMatrix * wp;
+        // The glow: a disc that faces the eye, flickering as the fire does, brighter and wider
+        // the harder the dragon breathes. In haze it is dimmer at its middle and wider: the
+        // air round the fire is what is lit.
+        float flicker = 0.84 + 0.16 * sin(uTime * 23.0 + along * 31.0) * sin(uTime * 7.3 + along * 11.0);
+        float radius = min(glow.z * (0.5 + 0.5 * uPower) * (1.0 + 0.5 * haze), 0.2 * dist);
+        vp.xy += glow.xy * radius * halo;
+        vec3 lit = mix(vec3(1.0, 0.78, 0.4), vec3(1.0, 0.33, 0.07), smoothstep(0.0, 0.5, along));
+        vFlame = mix(vFlame, vec4(lit * (glow.w * uPower * uPower * flicker * (1.0 - 0.45 * haze)), 0.0), halo);
+        gl_Position = projectionMatrix * vp;
       }
     `,
     fragmentShader: /* glsl */ `

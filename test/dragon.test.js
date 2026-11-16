@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BONE, BONE_COUNT, makeSkeleton, poseSkeleton, restPose, heave, skinPoint } from '../src/rig.js';
-import { buildDragon, buildFlame, DRAGONS } from '../src/dragonGeometry.js';
+import { buildDragon, buildFlame, DRAGONS, FLAME_GLOW } from '../src/dragonGeometry.js';
 import { ROAR_SECONDS } from '../src/flight.js';
 import { makeRng } from '../src/rng.js';
 
@@ -188,14 +188,16 @@ test('the skeleton: 24 bones, parents before children, and the head turns to loo
   assert.ok(open[1] < shut[1] - 0.3 * k, 'the chin drops ' + (shut[1] - open[1]).toFixed(2) + ' m');
 });
 
-test('fire: a spray of tongues from the mouth, pointing the way the snout does', () => {
+test('fire: a spray of tongues from the mouth, pointing the way the snout does, and three discs of glow', () => {
   for (const spec of DRAGONS) {
     const f = buildFlame(spec.build);
     const s = spec.build.scale;
-    assert.ok(f.triangles >= 40 && f.triangles <= 120, 'triangles: ' + f.triangles);
+    assert.ok(f.tongues >= 40 && f.tongues <= 120, 'triangles in the tongues: ' + f.tongues);
+    assert.ok(f.triangles <= 200, 'triangles in all, the glow with them: ' + f.triangles);
     assert.equal(f.position.length, f.vertices * 3);
     assert.equal(f.dir.length, f.vertices * 3);
     assert.equal(f.flame.length, f.vertices * 3);
+    assert.equal(f.glow.length, f.vertices * 4);
     assert.ok(Math.abs(f.length - 9.5 * s) < 1e-6);
     // It starts where the mouth is: in front of the head joint, on the midline.
     const sk = makeSkeleton(spec.build);
@@ -213,7 +215,27 @@ test('fire: a spray of tongues from the mouth, pointing the way the snout does',
     }
     // Every tongue has a tip that travels.
     let tips = 0;
-    for (let i = 0; i < f.vertices; i++) if (f.flame[i * 3] > 0.5) tips++;
-    assert.equal(tips, f.triangles, 'one travelling corner per triangle');
+    for (let i = 0; i < f.tongues * 3; i++) if (f.flame[i * 3] > 0.5) tips++;
+    assert.equal(tips, f.tongues, 'one travelling corner per triangle');
+    // The glow: the tongues have none; each disc is bright in its middle and nothing at its
+    // rim, so that it has no edge; and none is bigger than the dragon is long.
+    for (let i = 0; i < f.tongues * 3; i++) assert.equal(f.glow[i * 4 + 2], 0, 'a tongue is not a disc');
+    const discs = new Map();
+    for (let i = f.tongues * 3; i < f.vertices; i++) {
+      const [x, y, radius, bright] = [f.glow[i * 4], f.glow[i * 4 + 1], f.glow[i * 4 + 2], f.glow[i * 4 + 3]];
+      assert.ok(radius > 0.5 * s && radius < 8 * s, 'a disc of ' + radius.toFixed(1) + ' m');
+      const out = Math.hypot(x, y);
+      assert.ok(out <= 1 + 1e-6);
+      if (out > 0.999) assert.equal(bright, 0, 'nothing at the rim');
+      if (out < 1e-6) assert.ok(bright > 0.1 && bright <= 0.7, 'the middle is added light, not white: ' + bright);
+      const disc = discs.get(radius) || { most: 0, n: 0 };
+      disc.most = Math.max(disc.most, bright);
+      disc.n++;
+      discs.set(radius, disc);
+    }
+    assert.equal(discs.size, FLAME_GLOW.length, 'three discs');
+    // The bigger the disc, the dimmer: the hot one is small and at the mouth.
+    const order = [...discs.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1].most);
+    for (let i = 1; i < order.length; i++) assert.ok(order[i] < order[i - 1], 'wider is dimmer');
   }
 });

@@ -7,6 +7,7 @@
  *   node tools/sheet.mjs --every 4 0 120   one every 4 s from 0 to 120 s
  *   SHEET_FOV=50 SHEET_AIM=0 ...           field of view; which dragon to aim at (0, 1, or both)
  *   SHEET_FIXED=yaw,pitch                  do not follow: look this way (degrees left, degrees up)
+ *   SHEET_ROAR=0                           that dragon roars 0.9 s before each picture, so that it is breathing fire in it
  */
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -32,6 +33,7 @@ if (!times.length) times = [10, 20, 30, 40, 50, 60];
 const fov = Number(process.env.SHEET_FOV || 70);
 const aim = process.env.SHEET_AIM === undefined ? 'both' : process.env.SHEET_AIM;
 const fixed = process.env.SHEET_FIXED ? process.env.SHEET_FIXED.split(',').map(Number) : null;
+const roar = process.env.SHEET_ROAR === undefined ? null : Number(process.env.SHEET_ROAR);
 const width = Number(process.env.SHOTS_W || 960);
 const height = Number(process.env.SHOTS_H || 600);
 
@@ -54,10 +56,16 @@ try {
   await page.waitForFunction(() => window.__dragons && window.__dragons.ready, null, { timeout: 60000 });
   for (const t of times) {
     const info = await page.evaluate(
-      async ({ t, fov, aim, fixed }) => {
+      async ({ t, fov, aim, fixed, roar }) => {
         const d = window.__dragons;
         d.setFlatShot();
-        d.seek(t);
+        if (roar === null) {
+          d.seek(t);
+        } else {
+          d.seek(Math.max(t - 0.9, 0));
+          d.director.roar(roar, 'far');
+          d.fly(Math.min(t, 0.9));
+        }
         const f = d.director.flyers;
         const cam = d.stage.camera.position;
         const pick = aim === 'both' ? null : f[Number(aim)];
@@ -97,7 +105,7 @@ try {
           power: f.map((q) => q.power.toFixed(1)),
         };
       },
-      { t, fov, aim, fixed }
+      { t, fov, aim, fixed, roar }
     );
     const file = path.join(OUT, 'sheet-' + String(t).padStart(5, '0') + '.png');
     await page.screenshot({ path: file });
