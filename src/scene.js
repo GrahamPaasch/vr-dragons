@@ -41,6 +41,10 @@ export const SUN_DISC = 2.3;
 /** How far over the water the sheet of mist lies (metres). */
 const MIST_HEIGHT = 7;
 
+/** Shafts of sunlight in the haze: how many, and how bright the brightest is along its middle (added to the picture, 0..1). */
+const RAY_COUNT = 13;
+const RAY_BRIGHT = 0.17;
+
 /** Turn MeshBuilder arrays into a three.js geometry. */
 export function toGeometry(arrays, options) {
   const o = options || {};
@@ -261,10 +265,61 @@ export class Stage {
       const spill = 0.13 * Math.pow(Math.max(0, 1 - deg / 10.5), 2);
       return [spill, spill * 0.66, spill * 0.3];
     });
+    const sunRay = new Array((sunPos.length / 3) * 2).fill(0);
+
+    // Shafts of sunlight in the haze (part 2: see sunMaterial). A fan of blades round the
+    // sun, each a strip that is bright along its middle and nothing at its edges and ends.
+    // Longest out to the sides, where they lie across the hills; short downward, so that
+    // none reaches the near half of the lake (they are drawn RAY_DEPTH metres out, and water
+    // nearer than that would cut them off along a line).
+    const rayRng = makeRng(WORLD_SEED + 909);
+    let rays = 0;
+    for (let i = 0; i < RAY_COUNT; i++) {
+      // Round the sun, unevenly; 0 is to the viewer's right, a quarter turn is straight up.
+      const at = ((i + rayRng.range(-0.42, 0.42)) / RAY_COUNT) * Math.PI * 2;
+      const down = Math.max(-Math.sin(at), 0);
+      const upward = Math.max(Math.sin(at), 0);
+      const from = rayRng.range(3.2, 5.5);
+      const to = from + rayRng.range(20, 38) * (1 - 0.62 * down) * (1 - 0.35 * upward);
+      // Half its width, as an angle round the sun: a few broad beams among narrow ones.
+      const half = rayRng() < 0.35 ? rayRng.range(0.09, 0.15) : rayRng.range(0.03, 0.07);
+      const bright = rayRng.range(0.5, 1) * RAY_BRIGHT * (1 - 0.3 * upward) * (half > 0.08 ? 0.8 : 1);
+      const phase = rayRng();
+      const pace = rayRng.range(0.6, 1.6);
+      const first = sunPos.length / 3;
+      // Stations along it: nothing, full, fading, nothing.
+      const along = [[from, 0], [from + (to - from) * 0.16, 1], [from + (to - from) * 0.5, 0.55], [to, 0]];
+      for (const [deg, level] of along) {
+        const radius = (deg * Math.PI) / 180;
+        const sn = Math.sin(radius);
+        const cs = Math.cos(radius);
+        for (const across of [-1, 0, 1]) {
+          const a = at + across * half;
+          sunPos.push(
+            s[0] * cs + (side.x * Math.cos(a) + up.x * Math.sin(a)) * sn,
+            s[1] * cs + (side.y * Math.cos(a) + up.y * Math.sin(a)) * sn,
+            s[2] * cs + (side.z * Math.cos(a) + up.z * Math.sin(a)) * sn
+          );
+          const v = across === 0 ? level * bright : 0;
+          sunCol.push(v, v * 0.6, v * 0.27);
+          sunPart.push(2);
+          sunRay.push(phase, pace);
+        }
+      }
+      for (let k = 0; k < along.length - 1; k++) {
+        for (let j = 0; j < 2; j++) {
+          const a = first + k * 3 + j;
+          sunIdx.push(a, a + 1, a + 3, a + 1, a + 4, a + 3);
+          rays += 2;
+        }
+      }
+    }
+    this.rayTriangles = rays;
     const sg = new THREE.BufferGeometry();
     sg.setAttribute('position', new THREE.Float32BufferAttribute(sunPos, 3));
     sg.setAttribute('color', new THREE.Float32BufferAttribute(sunCol, 3));
     sg.setAttribute('part', new THREE.Float32BufferAttribute(sunPart, 1));
+    sg.setAttribute('ray', new THREE.Float32BufferAttribute(sunRay, 2));
     sg.setIndex(sunIdx);
     const sun = new THREE.Mesh(sg, sunMaterial(this.shared));
     sun.frustumCulled = false;

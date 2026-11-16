@@ -50,6 +50,8 @@ export function makeShared() {
     // How much of the sun a dragon is covering just now, seen from the ledge (0..1): its
     // shadow falls on the ledge and the trees by it, and the glare round the sun dims.
     uCover: { value: 0 },
+    // How bright the shafts of sunlight in the haze are (1: as designed; 0: none).
+    uRays: { value: 1 },
   };
 }
 
@@ -249,10 +251,19 @@ export function skyMaterial(shared) {
  *   1  the light that spills over the edge of whatever stands in front of the sun. That is not
  *      a thing, it happens in the eye: drawn in front of everything, and dimmed while a dragon
  *      covers the disc (uCover).
+ *   2  shafts of sunlight in the haze, fanning out from the sun. Real ones are light scattered
+ *      along the whole line of sight; here they are a fan of soft blades of added light, and
+ *      what stands for "along the line of sight" is that they are drawn RAY_DEPTH metres out:
+ *      the far hills, the far end of the lake and a dragon out there are behind them, the
+ *      ledge, the trees by it and a dragon close by are in front. Each blade sways and
+ *      brightens slowly on a clock of its own (`ray`: x phase, y how fast), and they go out
+ *      while a dragon covers the sun.
  */
+export const RAY_DEPTH = 200;
+
 export function sunMaterial(shared) {
   return new THREE.ShaderMaterial({
-    uniforms: { uCover: shared.uCover },
+    uniforms: { uCover: shared.uCover, uTime: shared.uTime, uSunDir: shared.uSunDir, uRays: shared.uRays },
     vertexColors: true,
     transparent: true,
     depthWrite: false,
@@ -261,14 +272,24 @@ export function sunMaterial(shared) {
     side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
       uniform float uCover;
+      uniform float uTime;
+      uniform float uRays;
+      uniform vec3 uSunDir;
       attribute float part;
+      attribute vec2 ray;
       varying vec3 vColor;
       void main() {
-        float spill = step(0.5, part);
-        vColor = color * (1.0 - 0.8 * uCover * spill);
-        vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0);
-        // The sun at the far plane, the spill just inside the near one.
-        gl_Position = vec4(p.xy, mix(p.w, -0.999 * p.w, spill), p.w);
+        float spill = step(0.5, part) * step(part, 1.5);
+        float shaft = step(1.5, part);
+        vec3 dir = position;
+        // A shaft sways a little about the sun (turned about the line to it), and comes and goes.
+        float turn = shaft * 0.045 * sin(uTime * 0.05 * ray.y + ray.x * 6.2832);
+        dir = dir * cos(turn) + cross(uSunDir, dir) * sin(turn) + uSunDir * (dot(uSunDir, dir) * (1.0 - cos(turn)));
+        float breathe = 0.62 + 0.38 * sin(uTime * 0.31 * ray.y + ray.x * 17.0);
+        vColor = color * (1.0 - 0.8 * uCover * spill) * mix(1.0, breathe * uRays * (1.0 - 0.9 * uCover), shaft);
+        vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * dir * mix(1.0, ${glf(RAY_DEPTH)}, shaft), 1.0);
+        // The sun at the far plane, the spill just inside the near one, the shafts where they are.
+        gl_Position = vec4(p.xy, mix(mix(p.w, -0.999 * p.w, spill), p.z, shaft), p.w);
       }
     `,
     fragmentShader: FLAT_FRAGMENT,
