@@ -31,9 +31,10 @@ export class MeshBuilder {
 
   /**
    * One triangle, counter-clockwise seen from outside. `color` and `aux` are either one value
-   * for the whole face or an array of three (one per corner).
+   * for the whole face or an array of three (one per corner). `normals`, if given, is three
+   * unit normals (one per corner) to use instead of the face's own: a rounded surface.
    */
-  tri(a, b, c, color, aux) {
+  tri(a, b, c, color, aux, normals) {
     const ux = b[0] - a[0];
     const uy = b[1] - a[1];
     const uz = b[2] - a[2];
@@ -56,7 +57,8 @@ export class MeshBuilder {
       const col = perCornerColor ? color[i] : color;
       const x = perCornerAux ? aux[i] : aux || ZERO4;
       this.position.push(p[0], p[1], p[2]);
-      this.normal.push(nx, ny, nz);
+      if (normals) this.normal.push(normals[i][0], normals[i][1], normals[i][2]);
+      else this.normal.push(nx, ny, nz);
       this.color.push(col[0], col[1], col[2]);
       this.aux.push(x[0], x[1], x[2], x[3]);
     }
@@ -161,8 +163,13 @@ export class MeshBuilder {
    * out per corner, not per face, so that the faces which meet at a corner agree there: aux
    * carries how far a vertex sways in the wind, and faces that swayed by different amounts
    * came apart along their edges, with the background showing through as hairlines.
+   * options: { corner: the colour function is asked per corner, (unitDirection, cornerIndex),
+   * so that colour runs smoothly over the lump instead of changing from face to face;
+   * round: 0..1, how far each corner's normal is turned from its face's toward the lump's own
+   * roundness, so that light falls on it as on one soft mass and not on a cut stone }.
    */
-  blob(center, radius, detail, bumps, seed, color, aux) {
+  blob(center, radius, detail, bumps, seed, color, aux, options) {
+    const o = options || {};
     const sphere = icosphere(detail);
     const verts = sphere.vertices;
     const moved = new Array(verts.length);
@@ -173,15 +180,28 @@ export class MeshBuilder {
     }
     const colorFn = typeof color === 'function' ? color : null;
     const auxAt = typeof aux === 'function' ? verts.map((d) => aux(d)) : null;
+    const cornerColor = colorFn && o.corner ? verts.map((d, i) => colorFn(d, i)) : null;
+    // The way the lump's own surface faces at each corner (an ellipsoid's normal).
+    const round = o.round ? verts.map((d) => normalize([d[0] / radius[0], d[1] / radius[1], d[2] / radius[2]])) : null;
     const dir = [0, 0, 0];
     for (let f = 0; f < sphere.faces.length; f++) {
       const [a, b, c] = sphere.faces[f];
-      if (colorFn) {
+      if (colorFn && !cornerColor) {
         dir[0] = (verts[a][0] + verts[b][0] + verts[c][0]) / 3;
         dir[1] = (verts[a][1] + verts[b][1] + verts[c][1]) / 3;
         dir[2] = (verts[a][2] + verts[b][2] + verts[c][2]) / 3;
       }
-      this.tri(moved[a], moved[b], moved[c], colorFn ? colorFn(dir, f) : color, auxAt ? [auxAt[a], auxAt[b], auxAt[c]] : aux);
+      let normals = null;
+      if (round) {
+        const pa = moved[a];
+        const pb = moved[b];
+        const pc = moved[c];
+        const face = normalize(cross([pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]], [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]]));
+        const k = o.round;
+        normals = [a, b, c].map((v) => normalize([face[0] * (1 - k) + round[v][0] * k, face[1] * (1 - k) + round[v][1] * k, face[2] * (1 - k) + round[v][2] * k]));
+      }
+      const col = cornerColor ? [cornerColor[a], cornerColor[b], cornerColor[c]] : colorFn ? colorFn(dir, f) : color;
+      this.tri(moved[a], moved[b], moved[c], col, auxAt ? [auxAt[a], auxAt[b], auxAt[c]] : aux, normals);
     }
     return this;
   }

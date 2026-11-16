@@ -47,11 +47,18 @@ const KINDS = {
 };
 const PINES = { pine: 6, whitePine: 6, farPine: 4, farPine2: 4 }; // sides of the trunk
 
-/** Leaves: lighter on top, darker underneath, and every facet a little different. */
+/** Leaves: lighter on top, darker underneath, and mottled a little. */
 function leafColor(base, dir, f, seed) {
-  const v = (0.6 + 0.5 * (dir[1] * 0.5 + 0.5)) * (0.84 + 0.32 * hash2(f, seed));
+  const v = (0.56 + 0.56 * (dir[1] * 0.5 + 0.5)) * (0.88 + 0.24 * hash2(f, seed));
   return scale(base, v);
 }
+
+/**
+ * A crown is soft: its colour runs smoothly over each lump, and the light falls on a lump as
+ * on something round (a low sun on a rounded crown gives it a lit side, a dark side and a
+ * glowing edge; on a faceted one it gives a scatter of bright and dark triangles).
+ */
+const SOFT = { corner: true, round: 0.75 };
 
 /**
  * A broadleaf tree. spec: one of HERO_TREES; base: the height of the ground it stands on.
@@ -109,7 +116,7 @@ function broadleaf(m, spec, base, seed) {
   lumps.forEach((lump, i) => {
     const base0 = kind.leaves[i % kind.leaves.length];
     const tint = scale(base0, 0.9 + 0.25 * rng());
-    m.blob(lump.c, lump.r, kind.detail, 0.2, seed + i * 13, (dir, f) => leafColor(tint, dir, f, seed + i), (dir) => [swayAt(lump.c[1] + dir[1] * lump.r[1]), 1, 0, phase]);
+    m.blob(lump.c, lump.r, kind.detail, 0.2, seed + i * 13, (dir, f) => leafColor(tint, dir, f, seed + i), (dir) => [swayAt(lump.c[1] + dir[1] * lump.r[1]), 1, 0, phase], SOFT);
     if (i === 0 || kind.boughs === false) return;
     // A bough from the trunk into the lump.
     const from = trunk[2 + (i % 3)];

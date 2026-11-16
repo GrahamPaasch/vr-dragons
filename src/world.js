@@ -19,11 +19,11 @@ const DEG = Math.PI / 180;
 export const LAKE_LEVEL = -46;
 
 /**
- * Where the sun is: a little left of straight ahead and low, so it hangs over the far end of the
- * lake. A unit vector toward it.
+ * Where the sun is: a little left of straight ahead and very low, minutes from setting, so it
+ * sits just over the ridges at the far end of the lake. A unit vector toward it.
  */
 export const SUN_AZIMUTH = 12 * DEG; // left of straight ahead
-export const SUN_ELEVATION = 9 * DEG;
+export const SUN_ELEVATION = 6.5 * DEG;
 export const SUN_DIR = [
   -Math.sin(SUN_AZIMUTH) * Math.cos(SUN_ELEVATION),
   Math.sin(SUN_ELEVATION),
@@ -392,37 +392,120 @@ export function clearHeight(x, z) {
 export const srgb = (r, g, b) => [Math.pow(r, 2.2), Math.pow(g, 2.2), Math.pow(b, 2.2)];
 export const hex = (h) => srgb(((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255);
 
-export const LIGHT = {
-  sun: [2.5, 1.5, 0.74], // low sun: strong and orange
-  sky: [0.2, 0.27, 0.46], // light from above: cool
-  bounce: [0.3, 0.19, 0.1], // light from below: warm, off the leaves
-  exposure: 1.25,
+/**
+ * The grade: how a linear colour becomes what the screen shows. It is the look of the whole
+ * piece, and it is three numbers:
+ *   exposure   where the soft shoulder sits: bright things roll off toward white, never clip
+ *   gamma      one per channel, and not the same: red is held down in the dark and blue is
+ *              lifted, so shadows go cool while the sunlit side stays warm (in the highlights
+ *              the three meet again). This is the "warm lights, cool shadows" of a film grade,
+ *              and because each channel has its own curve it costs the shader nothing.
+ *   contrast   how much of an S-curve is laid over the result: darks deeper, lights brighter
+ * shaders.js builds its dvDisplay() from these same numbers.
+ */
+export const GRADE = {
+  exposure: 1.2,
+  gamma: [0.485, 0.4545, 0.425],
+  contrast: 0.4,
 };
 
-export const FOG = {
-  color: srgb(0.8, 0.69, 0.71), // away from the sun: dusty pink
-  sunColor: [1.75, 1.16, 0.5], // toward the sun: gold
-  haze: 0.00085, // thin haze everywhere, per metre
-  mist: 0.0065, // extra at lake level, per metre
-  falloff: 1 / 14, // the mist thins with height; 14 m scale
-  base: LAKE_LEVEL,
+const displayChannel = (v, i) => {
+  const g = Math.pow(1 - Math.exp(-Math.max(v, 0) * GRADE.exposure), GRADE.gamma[i]);
+  return g + GRADE.contrast * (g * g * (3 - 2 * g) - g);
 };
 
-export const SKY = {
-  zenith: srgb(0.2, 0.36, 0.66),
-  upper: srgb(0.48, 0.58, 0.8),
-};
+/** Linear colour to what is written to the screen: a soft shoulder, gamma, contrast. In place. */
+export function toDisplay(c) {
+  c[0] = displayChannel(c[0], 0);
+  c[1] = displayChannel(c[1], 1);
+  c[2] = displayChannel(c[2], 2);
+  return c;
+}
 
-/** Haze colour looking along a unit direction: gold toward the sun, pink away from it. */
-export function fogColor(dx, dy, dz, out) {
-  const s = Math.max(dx * SUN_DIR[0] + dy * SUN_DIR[1] + dz * SUN_DIR[2], 0);
-  const s2 = s * s;
-  const s8 = s2 * s2 * s2 * s2;
-  const k = s8 * 0.8 + s2 * 0.2;
-  out[0] = lerp(FOG.color[0], FOG.sunColor[0], k);
-  out[1] = lerp(FOG.color[1], FOG.sunColor[1], k);
-  out[2] = lerp(FOG.color[2], FOG.sunColor[2], k);
+/**
+ * The other way: the linear colour that toDisplay() turns into this screen colour (each channel
+ * 0..1). The sky and the haze are chosen as the colours they should have on the screen, and
+ * turned into linear light with this, once, when the page starts.
+ */
+export function fromDisplay(r, g, b) {
+  const out = [r, g, b];
+  for (let i = 0; i < 3; i++) {
+    const y = clamp(out[i], 0, 0.992);
+    // Undo the S-curve (Newton's method: it is monotonic), then the gamma, then the shoulder.
+    let s = y;
+    for (let n = 0; n < 12; n++) {
+      const f = s + GRADE.contrast * (s * s * (3 - 2 * s) - s) - y;
+      const df = 1 + GRADE.contrast * (6 * s - 6 * s * s - 1);
+      s = clamp(s - f / df, 0, 1);
+    }
+    const shoulder = Math.min(Math.pow(s, 1 / GRADE.gamma[i]), 0.9995);
+    out[i] = -Math.log(1 - shoulder) / GRADE.exposure;
+  }
   return out;
+}
+
+export const LIGHT = {
+  sun: [2.7, 0.88, 0.21], // the last of the sun: strong, and deep orange
+  sky: [0.085, 0.115, 0.27], // light from above: the blue of dusk
+  bounce: [0.12, 0.06, 0.045], // light from below: dim and warm, off the leaves
+  exposure: GRADE.exposure,
+};
+
+/**
+ * Haze. Its colour depends on which way one looks: blazing orange into the sun, a dusty rose
+ * to the sides, the violet of the earth's shadow with the sun at one's back. All three are
+ * given as screen colours. There is a lot of it: it is what gives the valley its depth (each
+ * ridge a shade paler than the one in front), it carries the sun's glow down between the
+ * hills, and it hides the far edge of what is drawn.
+ */
+export const FOG = {
+  color: fromDisplay(0.27, 0.27, 0.49), // away from the sun
+  sideColor: fromDisplay(0.58, 0.3, 0.37), // across it
+  sunColor: fromDisplay(0.95, 0.47, 0.16), // into it
+  haze: 0.0008, // haze everywhere, per metre
+  mist: 0.013, // extra at lake level, per metre
+  falloff: 1 / 9, // the mist lies on the water: it thins with height, on a 9 m scale
+  base: LAKE_LEVEL,
+  desaturate: 0.3, // how far colour drains out of what the haze covers, at full haze
+};
+
+/**
+ * The sky above the haze, as screen colours at a few heights above the horizon (degrees), in
+ * three columns: looking toward the sun, across it, and away from it. On the horizon itself the
+ * sky is the colour of the haze, so that far land fades into it without a seam.
+ */
+export const SKY = {
+  stops: [0, 1.3, 4, 9, 16, 26, 40, 60, 90],
+  toward: [null, [1.0, 0.64, 0.25], [1.0, 0.55, 0.2], [0.97, 0.41, 0.2], [0.8, 0.3, 0.29], [0.52, 0.24, 0.39], [0.27, 0.18, 0.4], [0.12, 0.11, 0.31], [0.055, 0.065, 0.21]],
+  side: [null, [0.78, 0.47, 0.42], [0.74, 0.44, 0.43], [0.63, 0.38, 0.46], [0.47, 0.31, 0.47], [0.31, 0.24, 0.44], [0.18, 0.16, 0.38], [0.095, 0.1, 0.29], [0.055, 0.065, 0.21]],
+  // Over the earth's shadow the sky is rose for a hand's breadth (the "belt of Venus").
+  away: [null, [0.4, 0.34, 0.53], [0.54, 0.4, 0.55], [0.66, 0.43, 0.53], [0.48, 0.35, 0.52], [0.28, 0.24, 0.46], [0.16, 0.16, 0.38], [0.09, 0.1, 0.29], [0.055, 0.065, 0.21]],
+};
+for (const column of [SKY.toward, SKY.side, SKY.away]) for (let i = 1; i < column.length; i++) column[i] = fromDisplay(column[i][0], column[i][1], column[i][2]);
+
+/** Haze colour looking along a unit direction (linear). The same formula is in shaders.js. */
+export function fogColor(dx, dy, dz, out) {
+  const s = dx * SUN_DIR[0] + dy * SUN_DIR[1] + dz * SUN_DIR[2];
+  const a = Math.max(s, 0);
+  const a2 = a * a;
+  const a8 = a2 * a2 * a2 * a2;
+  const side = smoothstep(-0.9, 0.35, s);
+  const sun = a2 * 0.35 + a8 * 0.65;
+  out[0] = lerp(lerp(FOG.color[0], FOG.sideColor[0], side), FOG.sunColor[0], sun);
+  out[1] = lerp(lerp(FOG.color[1], FOG.sideColor[1], side), FOG.sunColor[1], sun);
+  out[2] = lerp(lerp(FOG.color[2], FOG.sideColor[2], side), FOG.sunColor[2], sun);
+  return out;
+}
+
+/**
+ * Lay haze over a linear colour, in place: `amount` of it (0..1), of colour `fog`. What is
+ * covered loses its own colour a little faster than it gains the haze's.
+ */
+export function hazeOver(c, fog, amount) {
+  const grey = 0.3 * c[0] + 0.5 * c[1] + 0.2 * c[2];
+  const d = amount * FOG.desaturate;
+  for (let i = 0; i < 3; i++) c[i] = lerp(lerp(c[i], grey, d), fog[i], amount);
+  return c;
 }
 
 /** How much haze lies between an eye and a point `dist` metres away along a unit direction. */
@@ -437,29 +520,40 @@ export function fogAmount(eyeY, dirY, dist) {
 
 const tmpFog = [0, 0, 0];
 
-/** Sky colour along a unit direction (linear RGB), sun glow included but not the disc. */
-export function skyColor(dx, dy, dz, out) {
+const SUN_FLAT = Math.hypot(SUN_DIR[0], SUN_DIR[2]);
+
+/**
+ * Sky colour along a unit direction (linear RGB). `glow` (default true) adds the light round
+ * the sun, though not its disc: the picture draws that glow as a thing of its own (scene.js,
+ * buildSky), and asks for the sky without it; the lake's mirror image wants it in.
+ */
+export function skyColor(dx, dy, dz, out, glow) {
   const flat = Math.hypot(dx, dz) || 1;
   fogColor(dx / flat, 0, dz / flat, tmpFog);
-  const up = Math.max(dy, 0);
-  const a = 1 - Math.exp(-up * 5.5); // horizon band -> upper sky
-  const b = smoothstep(0.15, 0.95, up); // upper sky -> zenith
+  // Which of the three columns: by how far round from the sun this is.
+  const round = (dx * SUN_DIR[0] + dz * SUN_DIR[2]) / (flat * SUN_FLAT);
+  const toward = smoothstep(0, 1, round);
+  const away = smoothstep(0, 1, -round);
+  const side = 1 - toward - away;
+  const up = Math.asin(clamp(dy, 0, 1)) / DEG;
+  const stops = SKY.stops;
+  let k = 0;
+  while (k + 2 < stops.length && up >= stops[k + 1]) k++;
+  const t = clamp((up - stops[k]) / (stops[k + 1] - stops[k]), 0, 1);
   for (let i = 0; i < 3; i++) {
-    const upper = lerp(SKY.upper[i], SKY.zenith[i], b);
-    out[i] = lerp(tmpFog[i], upper, a);
+    const lo = k === 0 ? tmpFog[i] : SKY.toward[k][i] * toward + SKY.side[k][i] * side + SKY.away[k][i] * away;
+    const hi = SKY.toward[k + 1][i] * toward + SKY.side[k + 1][i] * side + SKY.away[k + 1][i] * away;
+    out[i] = lerp(lo, hi, t);
   }
-  const s = Math.max(dx * SUN_DIR[0] + dy * SUN_DIR[1] + dz * SUN_DIR[2], 0);
-  const glow = Math.pow(s, 24) * 0.55 + Math.pow(s, 220) * 1.6;
-  out[0] += glow * 1.9;
-  out[1] += glow * 1.35;
-  out[2] += glow * 0.7;
+  if (glow !== false) {
+    const s = clamp(dx * SUN_DIR[0] + dy * SUN_DIR[1] + dz * SUN_DIR[2], -1, 1);
+    const off = Math.acos(s) / DEG;
+    const g = 2.6 * Math.exp(-off / 2.4) + 0.5 * Math.exp(-off / 8);
+    out[0] += g;
+    out[1] += g * 0.55;
+    out[2] += g * 0.16;
+  }
   return out;
-}
-
-/** Linear colour to what is written to the screen: a soft shoulder, then gamma. In place. */
-export function toDisplay(c) {
-  for (let i = 0; i < 3; i++) c[i] = Math.pow(1 - Math.exp(-Math.max(c[i], 0) * LIGHT.exposure), 1 / 2.2);
-  return c;
 }
 
 /** Light on a surface with unit normal n, as a multiplier per channel. sunlit: 0 shade .. 1 sun. */

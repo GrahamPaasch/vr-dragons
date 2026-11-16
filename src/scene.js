@@ -35,6 +35,9 @@ const FOREST_SECTORS = 6;
 
 const BARK = W.srgb(0.27, 0.19, 0.13);
 
+/** How big the sun's disc is drawn: its radius in degrees (the real one is a quarter of a degree). */
+export const SUN_DISC = 2.3;
+
 /** Turn MeshBuilder arrays into a three.js geometry. */
 export function toGeometry(arrays, options) {
   const o = options || {};
@@ -116,22 +119,27 @@ export class Stage {
   // -------------------------------------------------------------------------------------------
 
   buildSky() {
-    // Bands of elevation, close together near the horizon where the colour changes fastest.
-    const bands = [-0.21, -0.06, 0, 0.03, 0.065, 0.11, 0.17, 0.25, 0.35, 0.48, 0.66, 0.9, 1.2, Math.PI / 2];
-    const segments = 48;
+    // Bands of elevation (degrees), close together near the horizon where the colour changes
+    // fastest: the sky goes from the orange of the haze through rose and violet to the blue
+    // of dusk within a hand's breadth.
+    const bands = [-12, -3, 0, 2, 4, 6.5, 9, 12, 16, 21, 26, 33, 40, 50, 60, 75, 90];
+    const segments = 64;
     const position = [];
     const color = [];
     const index = [];
     const c = [0, 0, 0];
     for (let b = 0; b < bands.length; b++) {
+      const el = (bands[b] * Math.PI) / 180;
       for (let s = 0; s <= segments; s++) {
         const az = (s / segments) * Math.PI * 2;
-        const cosE = Math.cos(bands[b]);
+        const cosE = Math.cos(el);
         const dx = Math.sin(az) * cosE;
-        const dy = Math.sin(bands[b]);
+        const dy = Math.sin(el);
         const dz = -Math.cos(az) * cosE;
         position.push(dx, dy, dz);
-        W.toDisplay(W.skyColor(dx, dy, dz, c));
+        // Without the light round the sun: that is drawn over it (below), finer than this
+        // dome's web could carry it.
+        W.toDisplay(W.skyColor(dx, dy, dz, c, false));
         color.push(c[0], c[1], c[2]);
       }
     }
@@ -146,7 +154,7 @@ export class Stage {
     g.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(color, 3));
     g.setIndex(index);
-    const sky = new THREE.Mesh(g, skyMaterial());
+    const sky = new THREE.Mesh(g, skyMaterial(this.shared));
     sky.frustumCulled = false;
     // After everything solid (so it only costs the pixels that are still empty), and BEFORE
     // the lake, the dragons' mirror images and their fire, none of which leaves a mark in the
@@ -157,8 +165,14 @@ export class Stage {
     this.scene.add(sky);
     this.sky = sky;
 
-    // The sun: its disc with the bright core of its glow, which anything in front hides, and
-    // a wide faint glare that lies over everything (see sunMaterial). One mesh.
+    // The sun. One mesh, rings round the direction of the sun, in parts told apart by `part`:
+    //   0  the disc and the light round it, far away: a hill, a cloud or a dragon in front
+    //      hides it, so that whatever crosses the sunset is a clean dark shape against it;
+    //   1  the little of that light which spills over the edge of whatever is in front (as it
+    //      does in an eye or a lens): drawn over everything, and dimmed while a dragon covers
+    //      the disc.
+    // The light is added to the sky's own colour, which is orange there already; the disc is
+    // big (a setting sun is, to the mind's eye) and nearly white.
     const sunPos = [];
     const sunCol = [];
     const sunPart = [];
@@ -166,7 +180,7 @@ export class Stage {
     const s = W.SUN_DIR;
     const side = new THREE.Vector3(s[2], 0, -s[0]).normalize();
     const up = new THREE.Vector3().crossVectors(new THREE.Vector3(s[0], s[1], s[2]), side).normalize();
-    const spokes = 28;
+    const spokes = 32;
     const rings = (degrees, part, colourAt) => {
       const first = sunPos.length / 3;
       for (let r = 0; r < degrees.length; r++) {
@@ -193,14 +207,25 @@ export class Stage {
         }
       }
     };
-    rings([0, 0.9, 1.45, 1.9, 3, 5, 8], 0, (deg) => {
-      const disc = deg < 1.5 ? 1 : 0;
-      const core = 0.5 * Math.exp(-deg / 2.2) * Math.max(0, Math.min(1, (8 - deg) / 3));
-      return [disc * 0.55 + core, disc * 0.5 + core * 0.8, disc * 0.34 + core * 0.5];
+    const DISC = SUN_DISC;
+    const GLOW_OUT = 38;
+    rings([0, DISC * 0.6, DISC * 0.94, DISC * 1.04, DISC * 1.35, DISC * 1.9, 6, 8, 11, 15, 20, 27, GLOW_OUT], 0, (deg) => {
+      if (deg < DISC) {
+        // The disc: white-gold, a little deeper toward its limb.
+        const limb = deg / DISC;
+        return [1, 0.9 - 0.14 * limb * limb, 0.62 - 0.3 * limb * limb];
+      }
+      // The light round it: a hot ring hugging the disc, then a wide warm glow that is gone
+      // by GLOW_OUT degrees.
+      const out = deg - DISC;
+      const fade = Math.max(0, 1 - deg / GLOW_OUT);
+      const hot = 0.6 * Math.exp(-out / 1.5);
+      const warm = 0.34 * Math.exp(-out / 7) * fade;
+      return [hot + warm, hot * 0.62 + warm * 0.42, hot * 0.24 + warm * 0.1];
     });
-    rings([0, 3, 6, 10, 14, 17], 1, (deg) => {
-      const wide = 0.2 * Math.exp(-deg / 7) * Math.max(0, Math.min(1, (17 - deg) / 9));
-      return [wide, wide * 0.8, wide * 0.5];
+    rings([0, 2.5, 5, 7.5, 10.5], 1, (deg) => {
+      const spill = 0.13 * Math.pow(Math.max(0, 1 - deg / 10.5), 2);
+      return [spill, spill * 0.66, spill * 0.3];
     });
     const sg = new THREE.BufferGeometry();
     sg.setAttribute('position', new THREE.Float32BufferAttribute(sunPos, 3));
@@ -215,23 +240,34 @@ export class Stage {
   }
 
   /**
-   * A few long, flat clouds far off, low in the sky, lit warm from the sun's side and mauve
-   * underneath. One mesh, a few hundred triangles, light worked out here once.
+   * Long, flat bars of cloud, far off and low in the sky: dark against the sunset, with the
+   * sun's fire on their undersides and their sunward edges, and rose in the east where the
+   * light strikes them full. One mesh, a few hundred triangles, coloured here once (smoothly
+   * over each lump, so that they read as vapour and not as cut stone).
    */
   buildClouds() {
     const rng = makeRng(WORLD_SEED + 404);
     const m = new MeshBuilder();
-    const light = [0, 0, 0];
     const sunAz = Math.atan2(-W.SUN_DIR[0], -W.SUN_DIR[2]); // left of straight ahead
-    // [degrees left of straight ahead, degrees up, how wide (degrees), how many lumps]
+    // Where the light on them comes from: the sun's side, and from below (the sun is under
+    // their horizon already).
+    const from = [W.SUN_DIR[0], -0.4, W.SUN_DIR[2]];
+    const fl = Math.hypot(from[0], from[1], from[2]);
+    const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+    // What they look like lit and unlit, by how nearly they are in line with the sun: as
+    // colours on the screen.
+    const LIT = { toward: W.fromDisplay(1, 0.6, 0.24), side: W.fromDisplay(0.96, 0.38, 0.31), away: W.fromDisplay(0.82, 0.5, 0.57) };
+    const DARK = { toward: W.fromDisplay(0.44, 0.17, 0.25), side: W.fromDisplay(0.3, 0.19, 0.36), away: W.fromDisplay(0.33, 0.29, 0.49) };
+    // [degrees left of straight ahead, degrees up, how wide (degrees), how many lumps, how thick]
     const bank = [
-      [58, 12, 17, 6], [34, 19, 12, 5], [-22, 13, 16, 6], [-48, 9, 13, 5], [-76, 16, 15, 5], [96, 10, 14, 5],
-      [128, 15, 13, 4], [-116, 11, 16, 5], [-158, 14, 14, 4], [170, 9, 12, 4], [-4, 27, 11, 4], [76, 26, 10, 4],
+      // Bars across the sunset: thin, and clear of the disc itself.
+      [29, 12.5, 21, 7, 0.4], [-5, 15.5, 15, 6, 0.4], [36, 19.5, 17, 6, 0.55], [4, 24, 15, 5, 0.65], [-24, 11, 13, 5, 0.45], [55, 9.5, 14, 5, 0.5],
+      // The rest of the sky.
+      [-50, 14, 16, 6, 0.9], [-82, 18, 16, 5, 1], [86, 13, 17, 6, 1], [122, 17, 14, 5, 1], [-118, 12, 16, 5, 1],
+      [-158, 16, 15, 5, 1], [168, 11, 14, 5, 1], [20, 36, 13, 5, 1], [-38, 31, 12, 4, 1], [72, 31, 12, 4, 1],
     ];
-    for (const [azDeg, elDeg, wideDeg, lumps] of bank) {
+    for (const [azDeg, elDeg, wideDeg, lumps, thick] of bank) {
       const az = (azDeg * Math.PI) / 180;
-      // Not across the sun: its place is the far end of the valley, clear.
-      if (Math.abs(Math.atan2(Math.sin(az - sunAz), Math.cos(az - sunAz))) < 0.3 && elDeg < 24) continue;
       const dist = 2300;
       const cx = -Math.sin(az) * dist;
       const cz = -Math.cos(az) * dist;
@@ -240,37 +276,42 @@ export class Stage {
       // The cloud lies across the line of sight.
       const ax = Math.cos(az);
       const azz = -Math.sin(az);
-      // How nearly the cloud is in line with the sun: those ones glow.
-      const toward = Math.max(Math.cos(az - sunAz), 0);
+      // How nearly the cloud is in line with the sun (1), or opposite it (-1).
+      const toward = Math.cos(az - sunAz);
+      const t = Math.min(Math.abs(toward) * 1.25, 1);
+      const lit = mix3(LIT.side, toward > 0 ? LIT.toward : LIT.away, t);
+      const dark = mix3(DARK.side, toward > 0 ? DARK.toward : DARK.away, t);
+      // With the sun behind the viewer the whole face of a cloud is lit; in front of the sun
+      // only what looks down or sunward.
+      const flood = toward < 0 ? 0.45 * t : 0;
       const n = lumps * 2;
       for (let i = 0; i < n; i++) {
         const f = i / (n - 1) - 0.5;
         const size = (1 - 1.6 * f * f) * rng.range(0.7, 1.15);
         const rx = (wide / n) * 1.9 * size;
-        const centre = [cx + ax * f * wide + rng.range(-30, 30), cy + rng.range(-9, 9) + 10 * size, cz + azz * f * wide + rng.range(-30, 30)];
+        const centre = [cx + ax * f * wide + rng.range(-30, 30), cy + rng.range(-7, 7) + 8 * size * thick, cz + azz * f * wide + rng.range(-30, 30)];
         const seed = Math.floor(rng() * 1000);
         m.blob(
           centre,
-          [Math.abs(ax) * rx + Math.abs(azz) * rx * 0.5 + 24, 24 * size + 9, Math.abs(azz) * rx + Math.abs(ax) * rx * 0.5 + 24],
-          0, 0.14, seed,
-          (dir, face) => {
-            // Lit from the sun's side and from above; the flat base is in shade, and warm
-            // where the low sun gets under it.
-            W.lightOn(dir[0], Math.max(dir[1], -0.15), dir[2], 1, light);
-            const under = dir[1] < -0.1 ? 0.62 : 1;
-            const v = (0.94 + 0.1 * hash2(face, seed)) * under;
-            const glow = 0.5 * toward * toward;
-            return [(0.62 * light[0] + glow * 1.3) * v, (0.6 * light[1] + glow * 0.85) * v, (0.68 * light[2] + glow * 0.5) * v];
+          [Math.abs(ax) * rx + Math.abs(azz) * rx * 0.5 + 24, (20 * size + 7) * thick, Math.abs(azz) * rx + Math.abs(ax) * rx * 0.5 + 24],
+          0, 0.1, seed,
+          (dir) => {
+            const d = (dir[0] * from[0] + dir[1] * from[1] + dir[2] * from[2]) / fl;
+            const k = Math.min(Math.max((d + 0.25) / 0.85, 0), 1);
+            const glow = Math.min(k * k * (3 - 2 * k) + flood, 1);
+            return mix3(dark, lit, glow);
           },
-          [0, 0, 0, 0]
+          [0, 0, 0, 0],
+          { corner: true }
         );
       }
     }
-    const mesh = new THREE.Mesh(toGeometry(m.arrays(), { normal: false }), worldMaterial(this.shared, { haze: 0.38 }));
+    const mesh = new THREE.Mesh(toGeometry(m.arrays(), { normal: false }), worldMaterial(this.shared, { haze: 0.3 }));
     mesh.frustumCulled = false;
     mesh.renderOrder = 32; // after the land, which hides most of them; before the sky
     this.scene.add(mesh);
     this.clouds = mesh;
+    this.cloudTriangles = m.triangleCount;
   }
 
   buildTerrain() {
@@ -337,17 +378,20 @@ export class Stage {
   /** The four tree shapes, each one unit tall with a crown one unit in radius. */
   treeShapes() {
     const leafShade = (dir, f, seed) => {
-      // Lighter on top, darker underneath, and every facet a little different.
-      const v = (0.62 + 0.52 * (dir[1] * 0.5 + 0.5)) * (0.84 + 0.32 * hash2(f, seed));
+      // Lighter on top, darker underneath, and mottled a little.
+      const v = (0.56 + 0.56 * (dir[1] * 0.5 + 0.5)) * (0.9 + 0.2 * hash2(f, seed));
       return [v, v, v];
     };
+    // A crown is one soft mass of leaves, not a cut stone: its colour runs smoothly over it
+    // and the light falls on it as on something round.
+    const SOFT = { corner: true, round: 0.8 };
     const swayLeaf = (dir) => [0.22 + 0.2 * dir[1], 1, 0, 0];
 
     const mid = new MeshBuilder();
     mid.tube([{ p: [0, 0, 0], r: 0.075 }, { p: [0, 0.52, 0], r: 0.045 }], 4, BARK, (k) => [k * 0.1, 0, 0, 0]);
-    mid.blob([0, 0.66, 0], [0.9, 0.34, 0.9], 0, 0.24, 11, (d, f) => leafShade(d, f, 3), swayLeaf);
-    mid.blob([0.46, 0.8, 0.18], [0.6, 0.25, 0.6], 0, 0.24, 23, (d, f) => leafShade(d, f, 5), swayLeaf);
-    mid.blob([-0.44, 0.75, -0.3], [0.62, 0.23, 0.58], 0, 0.24, 37, (d, f) => leafShade(d, f, 7), swayLeaf);
+    mid.blob([0, 0.66, 0], [0.9, 0.34, 0.9], 0, 0.24, 11, (d, f) => leafShade(d, f, 3), swayLeaf, SOFT);
+    mid.blob([0.46, 0.8, 0.18], [0.6, 0.25, 0.6], 0, 0.24, 23, (d, f) => leafShade(d, f, 5), swayLeaf, SOFT);
+    mid.blob([-0.44, 0.75, -0.3], [0.62, 0.23, 0.58], 0, 0.24, 37, (d, f) => leafShade(d, f, 7), swayLeaf, SOFT);
 
     const pine = new MeshBuilder();
     pine.tube([{ p: [0, 0, 0], r: 0.11 }, { p: [0, 0.4, 0], r: 0.07 }], 3, BARK, (k) => [k * 0.06, 0, 0, 0]);
@@ -383,15 +427,25 @@ export class Stage {
     const high = ring(0.74, 0.74, 0.5);
     const top = [0, 1, 0];
     const none = [0, 1, 0, 0];
+    // Rounded like the nearer crowns: each corner is lit as a point on a dome, and is darker
+    // the lower on the crown it sits.
+    const dome = (p) => {
+      const n = [p[0], (p[1] - 0.45) * 1.5, p[2]];
+      const l = Math.hypot(n[0], n[1], n[2]) || 1;
+      return [n[0] / l, n[1] / l, n[2] / l];
+    };
+    const shade = (p, k) => {
+      const v = (0.66 + 0.5 * p[1]) * (0.93 + 0.14 * hash2(k, 41));
+      return [v, v, v];
+    };
     let f = 0;
+    const face = (a, b, c) => far.tri(a, b, c, [shade(a, f), shade(b, f + 1), shade(c, f + 2)], none, [dome(a), dome(b), dome(c)]);
     for (let i = 0; i < 5; i++) {
       const j = (i + 1) % 5;
-      const a = 0.9 + 0.25 * hash2(f++, 41);
-      const b = 0.75 + 0.25 * hash2(f++, 41);
-      const c = 1.05 + 0.2 * hash2(f++, 41);
-      far.tri(low[i], high[i], low[j], [a * 0.8, a * 0.8, a * 0.8], none);
-      far.tri(low[j], high[i], high[j], [b, b, b], none);
-      far.tri(high[i], top, high[j], [c, c, c], none);
+      face(low[i], high[i], low[j]);
+      face(low[j], high[i], high[j]);
+      face(high[i], top, high[j]);
+      f += 3;
     }
 
     const farPine = new MeshBuilder();

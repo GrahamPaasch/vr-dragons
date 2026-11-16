@@ -18,7 +18,10 @@
  */
 
 import * as THREE from '../vendor/three.module.min.js';
-import { SUN_DIR, LIGHT, FOG } from './world.js';
+import { SUN_DIR, LIGHT, FOG, GRADE } from './world.js';
+
+/** A number as GLSL wants a float written. */
+const glf = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 
 /**
  * Which way the wind blows and how far it moves a crown at a moderate strength (main.js makes
@@ -35,9 +38,12 @@ export function makeShared() {
     uSkyColor: { value: new THREE.Vector3(LIGHT.sky[0], LIGHT.sky[1], LIGHT.sky[2]) },
     uBounceColor: { value: new THREE.Vector3(LIGHT.bounce[0], LIGHT.bounce[1], LIGHT.bounce[2]) },
     uFogColor: { value: new THREE.Vector3(FOG.color[0], FOG.color[1], FOG.color[2]) },
+    uFogSideColor: { value: new THREE.Vector3(FOG.sideColor[0], FOG.sideColor[1], FOG.sideColor[2]) },
     uFogSunColor: { value: new THREE.Vector3(FOG.sunColor[0], FOG.sunColor[1], FOG.sunColor[2]) },
     uFog: { value: new THREE.Vector4(FOG.haze, FOG.mist, FOG.falloff, FOG.base) },
     uExposure: { value: LIGHT.exposure },
+    // How much darker the picture is toward the edge of what the eye sees than in its middle.
+    uVignette: { value: VIGNETTE.flat },
     uTime: { value: 0 },
     // Direction and strength of the sway.
     uWind: { value: new THREE.Vector2(WIND[0], WIND[1]) },
@@ -47,23 +53,36 @@ export function makeShared() {
   };
 }
 
+/**
+ * The vignette: the picture is a little darker away from the middle of what the eye sees, which
+ * holds the gaze on the valley and the sun. Like everything else it is worked out per vertex
+ * (from the angle between the way the eye points and the way to the vertex), so it costs no
+ * pixel anything. In a headset it is gentler: each eye has its own, and the lenses add theirs.
+ */
+export const VIGNETTE = { flat: 0.34, vr: 0.2 };
+
 const COMMON = /* glsl */ `
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uSkyColor;
 uniform vec3 uBounceColor;
 uniform vec3 uFogColor;
+uniform vec3 uFogSideColor;
 uniform vec3 uFogSunColor;
 uniform vec4 uFog;
 uniform float uExposure;
+uniform float uVignette;
 uniform float uTime;
 
+// (world.js, fogColor)
 vec3 dvFogColor(vec3 dir) {
-  float s = max(dot(dir, uSunDir), 0.0);
-  float s2 = s * s;
-  float s8 = s2 * s2;
-  s8 *= s8;
-  return mix(uFogColor, uFogSunColor, s8 * 0.8 + s2 * 0.2);
+  float s = dot(dir, uSunDir);
+  float a = max(s, 0.0);
+  float a2 = a * a;
+  float a8 = a2 * a2;
+  a8 *= a8;
+  vec3 c = mix(uFogColor, uFogSideColor, smoothstep(-0.9, 0.35, s));
+  return mix(c, uFogSunColor, a2 * 0.35 + a8 * 0.65);
 }
 
 float dvFogAmount(float eyeY, float dirY, float dist) {
@@ -80,17 +99,28 @@ vec3 dvLight(vec3 n, float sunlit) {
   return mix(uBounceColor, uSkyColor, n.y * 0.5 + 0.5) + uSunColor * d;
 }
 
+// The grade (world.js, GRADE and toDisplay): a soft shoulder, a gamma for each channel so that
+// shadows fall cool, and an S-curve for contrast.
 vec3 dvDisplay(vec3 c) {
-  return pow(1.0 - exp(-max(c, 0.0) * uExposure), vec3(0.4545));
+  vec3 g = pow(1.0 - exp(-max(c, 0.0) * uExposure), vec3(${GRADE.gamma.map(glf).join(', ')}));
+  return g + ${glf(GRADE.contrast)} * (g * g * (3.0 - 2.0 * g) - g);
 }
 
-// Haze between the eye and a world position, applied to a linear colour.
+// Haze between the eye and a world position, applied to a linear colour (world.js, hazeOver).
 vec3 dvHaze(vec3 c, vec3 worldPos, float scale) {
   vec3 toP = worldPos - cameraPosition;
   float dist = length(toP);
   vec3 dir = toP / max(dist, 1.0e-4);
   float f = dvFogAmount(cameraPosition.y, dir.y, dist) * scale;
+  c = mix(c, vec3(dot(c, vec3(0.3, 0.5, 0.2))), f * ${glf(FOG.desaturate)});
   return mix(c, dvFogColor(dir), f);
+}
+
+// The vignette, from a position in the eye's own frame: 1 in the middle of the view, less
+// toward its edge.
+float dvVignette(vec3 viewPos) {
+  float c = -viewPos.z / max(length(viewPos), 1.0e-4);
+  return 1.0 - uVignette * (1.0 - smoothstep(0.42, 0.93, c));
 }
 `;
 
@@ -160,14 +190,16 @@ export function worldMaterial(shared, options) {
           n = normalize(mat3(modelMatrix) * n);
           vec3 albedo = c;
           c = albedo * dvLight(n, sunlit);
-          // Low sun through leaves: the side away from the sun glows.
-          c += albedo * uSunColor * (max(-dot(n, uSunDir), 0.0) * 0.55 * aux.y * sunlit);
+          // Low sun through leaves: the side away from the sun is not black but glows a
+          // little, deep in the leaf's own colour (the light has been through it twice over).
+          c += albedo * albedo * uSunColor * (max(-dot(n, uSunDir), 0.0) * 0.5 * aux.y * sunlit);
         #endif
         // A dragon between the ledge and the low sun: for that moment its shadow is on the
         // ledge and on everything within a few strides of it.
         c *= 1.0 - 0.42 * uCover * (1.0 - smoothstep(22.0, 42.0, length(wp.xz)));
-        vColor = dvDisplay(dvHaze(c, wp.xyz, uHaze));
-        gl_Position = projectionMatrix * viewMatrix * wp;
+        vec4 vp = viewMatrix * wp;
+        vColor = dvDisplay(dvHaze(c, wp.xyz, uHaze)) * dvVignette(vp.xyz);
+        gl_Position = projectionMatrix * vp;
       }
     `,
     fragmentShader: FLAT_FRAGMENT,
@@ -178,16 +210,21 @@ export function worldMaterial(shared, options) {
  * The sky dome. Its vertex colours are final screen colours (baked in scene.js); it is drawn at
  * the far plane after everything solid, so it only costs pixels where sky shows.
  */
-export function skyMaterial() {
+export function skyMaterial(shared) {
   return new THREE.ShaderMaterial({
+    uniforms: { uVignette: shared.uVignette },
     vertexColors: true,
     depthWrite: false,
     side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
+      uniform float uVignette;
       varying vec3 vColor;
       void main() {
-        vColor = color;
-        vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0);
+        vec3 v = mat3(viewMatrix) * position;
+        // The vignette (see dvVignette).
+        float c = -v.z / max(length(v), 1.0e-4);
+        vColor = color * (1.0 - uVignette * (1.0 - smoothstep(0.42, 0.93, c)));
+        vec4 p = projectionMatrix * vec4(v, 1.0);
         gl_Position = p.xyww;
       }
     `,
@@ -203,14 +240,15 @@ export function skyMaterial() {
 }
 
 /**
- * The sun: its disc, and the glare round it. One mesh and one draw call, in two parts told apart
- * by `part` (0: disc, 1: glare).
- *
- * The disc is a thing in the sky: it is drawn at the far plane and tested against what has been
- * drawn already, so a hill, a cloud or a dragon in front of it hides it. (Added over everything,
- * as it once was, it showed through a dragon's wing like a hole.) The glare is not a thing: it
- * is light scattered on the way to the eye, so it is drawn in front of everything, and it dims
- * while a dragon covers the disc (uCover).
+ * The sun and the light round it. One mesh and one draw call, in parts told apart by `part`
+ * (see scene.js, buildSky):
+ *   0  the disc and its glow. They are things in the sky: drawn at the far plane and tested
+ *      against what has been drawn already, so a hill, a cloud or a dragon in front of them
+ *      hides them, and is seen as a dark shape against the light. (Added over everything, the
+ *      disc once showed through a dragon's wing like a hole.)
+ *   1  the light that spills over the edge of whatever stands in front of the sun. That is not
+ *      a thing, it happens in the eye: drawn in front of everything, and dimmed while a dragon
+ *      covers the disc (uCover).
  */
 export function sunMaterial(shared) {
   return new THREE.ShaderMaterial({
@@ -226,10 +264,11 @@ export function sunMaterial(shared) {
       attribute float part;
       varying vec3 vColor;
       void main() {
-        vColor = color * mix(1.0, 1.0 - 0.7 * uCover, part);
+        float spill = step(0.5, part);
+        vColor = color * (1.0 - 0.8 * uCover * spill);
         vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0);
-        // The disc at the far plane, the glare just inside the near one.
-        gl_Position = vec4(p.xy, mix(p.w, -0.999 * p.w, part), p.w);
+        // The sun at the far plane, the spill just inside the near one.
+        gl_Position = vec4(p.xy, mix(p.w, -0.999 * p.w, spill), p.w);
       }
     `,
     fragmentShader: FLAT_FRAGMENT,
@@ -258,6 +297,7 @@ export function waterMaterial(shared, reflection, noise, bounds) {
       varying vec2 vUv;
       varying vec2 vWorld;
       varying vec4 vFog;
+      varying float vDim;
       void main() {
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vUv = (wp.xz - uBounds.xy) * uBounds.zw;
@@ -266,7 +306,9 @@ export function waterMaterial(shared, reflection, noise, bounds) {
         float dist = length(toP);
         vec3 dir = toP / max(dist, 1.0e-4);
         vFog = vec4(dvDisplay(dvFogColor(dir)), dvFogAmount(cameraPosition.y, dir.y, dist));
-        gl_Position = projectionMatrix * viewMatrix * wp;
+        vec4 vp = viewMatrix * wp;
+        vDim = dvVignette(vp.xyz);
+        gl_Position = projectionMatrix * vp;
       }
     `,
     fragmentShader: /* glsl */ `
@@ -276,6 +318,7 @@ export function waterMaterial(shared, reflection, noise, bounds) {
       varying vec2 vUv;
       varying vec2 vWorld;
       varying vec4 vFog;
+      varying float vDim;
       void main() {
         float n1 = texture2D(uNoise, vWorld * 0.047 + vec2(uTime * 0.019, uTime * 0.011)).r;
         float n2 = texture2D(uNoise, vWorld * 0.073 - vec2(uTime * 0.015, -uTime * 0.022)).g;
@@ -283,7 +326,7 @@ export function waterMaterial(shared, reflection, noise, bounds) {
         vec4 r = texture2D(uReflection, vUv + (vec2(n1, n2) - 0.5) * 0.006);
         float sparkle = smoothstep(0.34, 0.46, n1 * n2);
         vec3 c = r.rgb * (0.95 + 0.1 * n1) + vec3(1.0, 0.86, 0.6) * (r.a * (sparkle * 1.1 + 0.12));
-        gl_FragColor = vec4(mix(c, vFog.rgb, vFog.a), 1.0);
+        gl_FragColor = vec4(mix(c, vFog.rgb, vFog.a) * vDim, 1.0);
       }
     `,
   });
@@ -361,8 +404,9 @@ export function leafMaterial(shared, box) {
         // Thin enough for the low sun to shine through: lit from either side.
         float sun = 0.3 + 0.7 * abs(dot(n, uSunDir));
         vec3 c = aLeaf.rgb * (mix(uBounceColor, uSkyColor, n.y * 0.5 + 0.5) + uSunColor * (sun * 0.85));
-        vColor = dvDisplay(dvHaze(c, wp.xyz, 1.0));
-        gl_Position = projectionMatrix * viewMatrix * wp;
+        vec4 vp = viewMatrix * wp;
+        vColor = dvDisplay(dvHaze(c, wp.xyz, 1.0)) * dvVignette(vp.xyz);
+        gl_Position = projectionMatrix * vp;
       }
     `,
     fragmentShader: FLAT_FRAGMENT,
@@ -427,8 +471,9 @@ export function dragonMaterial(shared, bones, options) {
         // Less haze than the land gets (six tenths of it): down in the mist of the valley
         // floor the dragons are what the eye is looking for, and they must not sink into it.
         // (Measured, with and without each dragon in the picture: see the README.)
-        vColor = dvDisplay(dvHaze(c, wp.xyz, 0.6));
-        gl_Position = projectionMatrix * viewMatrix * wp;
+        vec4 vp = viewMatrix * wp;
+        vColor = dvDisplay(dvHaze(c, wp.xyz, 0.6)) * dvVignette(vp.xyz);
+        gl_Position = projectionMatrix * vp;
       }
     `,
     fragmentShader: o.mirror

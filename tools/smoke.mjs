@@ -331,6 +331,9 @@ async function flatScreen(browser, base) {
           const tick = () => (d.stage.renderer.info.render.frame >= start + n ? resolve() : setTimeout(tick, 8));
           tick();
         });
+      // (The dragon that was called a moment ago may still be breathing the fire of its own
+      // roar: this is about a new one, so let that one burn out first.)
+      for (let i = 0; i < 60 && d.dragons.some((x) => x.flame.visible); i++) await wait(2);
       const before = d.dragons.map((x) => x.flame.visible);
       const roars = d.audio.stats.roars;
       d.director.roar(0, 'far');
