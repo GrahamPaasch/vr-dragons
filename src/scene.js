@@ -76,7 +76,7 @@ export class Stage {
       powerPreference: 'high-performance',
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setClearColor(0xd8b89c, 1);
+    renderer.setClearColor(0x241a2c, 1); // dusk, should anything ever be left undrawn
     renderer.xr.enabled = true;
     // Colours leave the shaders ready for the screen; three.js must not convert them again.
     renderer.outputColorSpace = THREE.LinearSRGBColorSpace;

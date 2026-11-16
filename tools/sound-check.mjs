@@ -21,6 +21,9 @@ const wantWav = process.argv.includes('--wav');
 
 /** Runs in the page. Returns one row of measurements per scene (and the samples, if asked). */
 async function renderAll(wantSamples) {
+  // Nothing here is looked at: the picture need not be drawn while the sound is worked out.
+  // (Drawn in software, as it is in a headless browser, it took eight processors for nothing.)
+  if (window.__dragons && window.__dragons.stage) window.__dragons.stage.renderer.setAnimationLoop(null);
   const A = await import('./src/audio.js');
   // How big each dragon sounds, as the page tells the sound (main.js, unlockSound).
   const VOICES = (await import('./src/dragonGeometry.js')).DRAGONS.map((d) => d.voice);
@@ -434,6 +437,9 @@ try {
     if (m.type() === 'error') problems.push('console.error: ' + m.text());
   });
   await page.goto(url + '?shots=1', { waitUntil: 'load' });
+  // (Once the valley is built: renderAll stops its picture being drawn, which it can only do
+  // to a picture that has started.)
+  await page.waitForFunction(() => window.__dragons && (window.__dragons.ready || window.__dragons.failed), null, { timeout: 60000 });
   const rows = await page.evaluate(renderAll, wantWav);
   const pad = (v, n) => String(v).padStart(n);
   const line = (label, m) =>

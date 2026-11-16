@@ -604,6 +604,14 @@ export function moteMaterial(shared, box) {
 }
 
 /**
+ * How much of the land's haze a dragon gets. Not all of it: far off in the glow of the valley
+ * the dragons are what the eye is looking for, and they are to stand in it as dark shapes,
+ * not melt into it. (Measured, with and without each dragon in the picture, by
+ * `npm run contrast`: see the README.)
+ */
+export const DRAGON_HAZE = 0.28;
+
+/**
  * A dragon. The vertex shader moves each vertex with its one or two bones (rig.js works the
  * bones out; they arrive as three rows of four numbers each) and lights it. `mirror` makes the
  * dimmer material used for the dragon's image in the lake.
@@ -617,7 +625,7 @@ export function moteMaterial(shared, box) {
  */
 export function dragonMaterial(shared, bones, options) {
   const o = options || {};
-  const defines = { DV_BONES: bones.length / 4 };
+  const defines = { DV_BONES: bones.length / 4, DV_DRAGON_HAZE: glf(DRAGON_HAZE) };
   if (o.mirror) defines.DV_MIRROR = 1;
   return new THREE.ShaderMaterial({
     uniforms: Object.assign(
@@ -683,11 +691,9 @@ export function dragonMaterial(shared, bones, options) {
         #ifdef DV_MIRROR
           c *= 0.55;
         #endif
-        // Less haze than the land gets (six tenths of it): down in the mist of the valley
-        // floor the dragons are what the eye is looking for, and they must not sink into it.
-        // (Measured, with and without each dragon in the picture: see the README.)
+        // Less haze than the land gets (see DRAGON_HAZE).
         vec4 vp = viewMatrix * wp;
-        vColor = dvDisplay(dvHaze(c, wp.xyz, 0.6)) * dvVignette(vp.xyz);
+        vColor = dvDisplay(dvHaze(c, wp.xyz, DV_DRAGON_HAZE)) * dvVignette(vp.xyz);
         gl_Position = projectionMatrix * vp;
       }
     `,
