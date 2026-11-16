@@ -2,8 +2,9 @@
 /**
  * Counts what the page asks the graphics chip to do: draw calls and triangles per frame, on a
  * flat screen and for both eyes of an emulated Oculus Quest 1, over several minutes of flight
- * and with the head turned every way. Also what is in the scene, and how long the page's own
- * work takes per frame on this machine.
+ * and with the head turned every way. Also what is in the scene, how much of the picture the
+ * see-through things cover (they are what costs a headset pixels: each is drawn alone and its
+ * pixels counted), and how long the page's own work takes per frame on this machine.
  *
  *   npm run perf                 the table
  *   npm run perf -- --json       the same as JSON (for keeping a record)
@@ -83,6 +84,75 @@ async function measure({ seconds, every, mode, xr }) {
   return { frames: n, calls: stat(calls), triangles: stat(triangles), worst, detailStep: d.state.quality };
 }
 
+/**
+ * Runs in the page: how much of the picture each see-through thing covers, as a headset's eye
+ * sees it (a lens about 93 degrees high and 90 wide). Each is drawn alone on black, looking
+ * every way, and the pixels that are not black are counted. That is every pixel it is blended
+ * into: what a headset pays for it, over and above the solid picture.
+ */
+async function overdraw() {
+  const d = window.__dragons;
+  d.setFlatShot();
+  d.seek(20);
+  const stage = d.stage;
+  const renderer = stage.renderer;
+  const gl = renderer.getContext();
+  const cam = stage.camera;
+  const was = { fov: cam.fov, aspect: cam.aspect, clear: renderer.getClearColor(new d.THREE.Color()).getHex() };
+  cam.fov = 93;
+  cam.aspect = 0.96;
+  cam.updateProjectionMatrix();
+  renderer.setClearColor(0x000000, 1);
+  const w = gl.drawingBufferWidth;
+  const h = gl.drawingBufferHeight;
+  const px = new Uint8Array(w * h * 4);
+  const all = [];
+  stage.scene.traverse((o) => {
+    if (o.isMesh) all.push([o, o.visible]);
+  });
+  const sun = stage.sun;
+  const layers = [
+    ['the glow round the sun', sun, () => sun.geometry.setDrawRange(0, sun.userData.solid)],
+    ['shafts of sunlight', sun, () => sun.geometry.setDrawRange(sun.userData.solid, sun.userData.all - sun.userData.solid)],
+    ['mist on the lake', stage.mist, null],
+    ['motes, sparks and ash', stage.motes, null],
+  ];
+  const out = [];
+  for (const [name, mesh, prepare] of layers) {
+    for (const [o] of all) o.visible = o === mesh;
+    if (prepare) prepare();
+    let most = 0;
+    let sum = 0;
+    let n = 0;
+    let where = '';
+    for (let yaw = 0; yaw < 360; yaw += 30) {
+      for (const pitch of [-40, -15, 6, 30]) {
+        d.view.set((yaw * Math.PI) / 180, (pitch * Math.PI) / 180);
+        d.view.apply();
+        stage.render();
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        let lit = 0;
+        for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] > 3) lit++;
+        const share = lit / (w * h);
+        sum += share;
+        n++;
+        if (share > most) {
+          most = share;
+          where = yaw + ' deg left, ' + pitch + ' deg up';
+        }
+      }
+    }
+    out.push({ name, most, mean: sum / n, where });
+  }
+  sun.geometry.setDrawRange(0, sun.userData.all);
+  for (const [o, v] of all) o.visible = v;
+  cam.fov = was.fov;
+  cam.aspect = was.aspect;
+  cam.updateProjectionMatrix();
+  renderer.setClearColor(was.clear, 1);
+  return out;
+}
+
 /** Runs in the page: what the scene is made of, and the cost of the page's own work per frame. */
 async function inventory() {
   const d = window.__dragons;
@@ -120,6 +190,14 @@ async function inventory() {
     groveTriangles: d.stage.groveTriangles,
     dragonTriangles: d.dragons.map((x) => x.triangles),
     leaves: d.stage.leaves.geometry.instanceCount,
+    air: d.stage.motes.geometry.instanceCount,
+    shafts: d.stage.rayTriangles,
+    sunTriangles: d.stage.sun.userData.all / 3,
+    mistTriangles: d.stage.mistTriangles,
+    skyTriangles: d.stage.skyTriangles,
+    stars: d.stage.starCount,
+    cloudTriangles: d.stage.cloudTriangles,
+    fireTriangles: d.dragons.map((x) => x.flame.geometry.attributes.position.count / 3),
     waterTriangles: d.stage.water.geometry.attributes.position.count / 3,
     textures: d.stage.renderer.info.memory.textures,
     geometries: d.stage.renderer.info.memory.geometries,
@@ -154,6 +232,7 @@ try {
   await flat.goto(url + '?shots=1&seed=20261115', { waitUntil: 'load' });
   await flat.waitForFunction(() => window.__dragons && window.__dragons.ready, null, { timeout: 60000 });
   out.inventory = await flat.evaluate(inventory);
+  out.overdraw = await flat.evaluate(overdraw);
   out.flatFollow = await flat.evaluate(measure, { seconds: SECONDS, every: 0.5, mode: 'follow', xr: false });
   out.flatSweep = await flat.evaluate(measure, { seconds: SECONDS, every: 0.5, mode: 'sweep', xr: false });
   await flat.close();
@@ -201,13 +280,17 @@ if (asJson) {
   const i = out.inventory;
   const pad = (v, n) => String(v).padStart(n);
   console.log(`What is in the scene`);
-  console.log(`  ${i.meshes} meshes (one draw call each when in view): terrain, lake, sky, sun, clouds, ${i.forestMeshes} forest batches, the ledge, the big trees by the creek, the leaves, 2 dragons, their 2 mirror images and their 2 fires, and the line of words shown in the headset`);
+  console.log(`  ${i.meshes} meshes (one draw call each when in view): terrain, lake, mist, sky (the far ranges, the moon and the stars are painted on it), sun (its glow and the shafts of light with it), clouds, ${i.forestMeshes} forest batches, the ledge, the big trees by the creek, the leaves, what hangs in the air, 2 dragons, their 2 mirror images and their 2 fires, and the line of words shown in the headset`);
   console.log(`  forest   ${pad(i.trees, 6)} trees, instanced, ${i.forestTriangles} triangles in all`);
   console.log(`  terrain  ${pad(i.terrainTriangles, 6)} triangles (lit once at start, not per frame)`);
   console.log(`  ledge    ${pad(i.ledgeTriangles, 6)} triangles (7 trees close by, boulders, fallen leaves)`);
   console.log(`  grove    ${pad(i.groveTriangles, 6)} triangles (9 big trees at the mouth of the creek, which the dragons fly between)`);
   console.log(`  dragons  ${pad(i.dragonTriangles.join(' + '), 6)} triangles, 24 bones each, posed in the vertex shader`);
   console.log(`  leaves   ${pad(i.leaves, 6)} in the air, one instanced draw call, animated in the vertex shader`);
+  console.log(`  in the air ${pad(i.air, 4)} motes, sparks and flakes of ash (that is the cap), one instanced draw call, 2 triangles each`);
+  console.log(`  sun      ${pad(i.sunTriangles, 6)} triangles: disc, glow, and ${i.shafts} in the shafts of sunlight`);
+  console.log(`  sky      ${pad(i.skyTriangles, 6)} triangles: the dome, three far ranges, the moon and ${i.stars} stars; clouds ${i.cloudTriangles}; mist ${i.mistTriangles}`);
+  console.log(`  fire     ${pad(i.fireTriangles.join(' + '), 6)} triangles, the glow round it included, drawn only while a dragon breathes`);
   console.log(`  lake     ${pad(i.waterTriangles, 6)} triangles; its mirror image is a 256 x 256 texture worked out at start`);
   console.log(`  textures ${i.textures}, shader programs ${i.programs}, no shadow maps, no render-to-texture, no post-processing`);
   console.log(`  everything at once, nothing culled: ${i.drawCallsIfNothingWereCulled} draw calls, ${i.trianglesIfNothingWereCulled} triangles\n`);
@@ -224,6 +307,8 @@ if (asJson) {
   console.log(`\n  Emulated Quest 1: ${out.vr.eyes} eyes of ${out.vr.viewport[0]} x ${out.vr.viewport[1]}, drawn through ${out.vr.renderPath}.`);
   console.log(`  Heaviest frame: ${w.calls} draw calls, ${w.triangles} triangles for both eyes (${w.at} s in, lane '${w.lane}', looking ${w.yaw} deg left, ${w.pitch} deg up).`);
   console.log(`  Budget: under ${BUDGET.calls} draw calls. Worst seen: ${worstCalls} for both eyes, ${Math.round(worstCalls / 2)} an eye. ${out.verdict.insideBudget ? 'Inside it.' : 'OVER IT.'}`);
+  console.log(`\nSee-through things: how much of one eye's picture each covers (drawn alone and counted, looking 48 ways)`);
+  for (const o of out.overdraw) console.log(`  ${o.name.padEnd(24)} at most ${pad((100 * o.most).toFixed(1), 5)}%  (looking ${o.where}); on average ${pad((100 * o.mean).toFixed(1), 5)}%`);
   console.log(`\nThe page's own work per frame, on this machine (a Quest 1 is several times slower)`);
   console.log(`  flying both dragons ${i.flyMs.toFixed(3)} ms, posing both skeletons ${i.poseMs.toFixed(3)} ms, handing a frame to WebGL ${i.drawMs.toFixed(2)} ms (software drawing here); a 72 Hz frame has 13.9 ms`);
   console.log(`  building the valley at start: ${i.buildMs} ms`);

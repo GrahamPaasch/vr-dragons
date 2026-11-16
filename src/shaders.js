@@ -392,7 +392,7 @@ export function mistMaterial(shared) {
         float dist = length(toP);
         vec3 dir = toP / max(dist, 1.0e-4);
         // Nothing of it close to the eye, where a flat sheet would be seen for what it is.
-        float a = edge * uAmount * (0.27 + 0.27 * bank + 0.07 * wisp) * smoothstep(25.0, 110.0, dist);
+        float a = edge * uAmount * (0.34 + 0.3 * bank + 0.08 * wisp) * smoothstep(25.0, 110.0, dist);
         vec4 vp = viewMatrix * wp;
         vMist = vec4(dvDisplay(dvFogColor(dir) * 1.08) * dvVignette(vp.xyz), clamp(a, 0.0, 0.8));
         gl_Position = projectionMatrix * vp;

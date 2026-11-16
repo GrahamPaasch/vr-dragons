@@ -166,6 +166,112 @@ export class Stage {
         index.push(a, a + 1, a + row, a + 1, a + row + 1, a + row);
       }
     }
+    // The first stars, and the moon, painted on the sky like the ranges (so they cost no draw
+    // call, and whatever is nearer hides them). A star is a small square with a bright middle
+    // and corners of the sky's own colour, so that it has no edge; they are only put where
+    // the sky has gone dark, and there are more of them, and brighter, toward the zenith and
+    // the east.
+    const starRng = makeRng(WORLD_SEED + 2024);
+    const sunV = W.SUN_DIR;
+    let stars = 0;
+    const tangent = (dx, dy, dz) => {
+      // Two unit vectors at right angles to a direction: sideways (level) and up.
+      const flat = Math.hypot(dx, dz) || 1;
+      const sx = dz / flat;
+      const sz = -dx / flat;
+      return [[sx, 0, sz], [-dy * (dx / flat), flat, -dy * (dz / flat)]];
+    };
+    const lit = [0, 0, 0];
+    for (let n = 0; n < W.STARS.count; n++) {
+      // Evenly over the upper sky (by area), then kept or not.
+      const az = starRng() * Math.PI * 2;
+      const dy = starRng.range(Math.sin((W.STARS.least * Math.PI) / 180), 1);
+      const cosE = Math.sqrt(1 - dy * dy);
+      const dx = Math.sin(az) * cosE;
+      const dz = -Math.cos(az) * cosE;
+      const size = starRng();
+      const tint = starRng();
+      const offSun = (Math.acos(dx * sunV[0] + dy * sunV[1] + dz * sunV[2]) * 180) / Math.PI;
+      const offMoon = (Math.acos(dx * W.MOON_DIR[0] + dy * W.MOON_DIR[1] + dz * W.MOON_DIR[2]) * 180) / Math.PI;
+      if (offSun < W.STARS.fromSun || offMoon < W.MOON.radius * 3.2) continue;
+      W.toDisplay(W.skyColor(dx, dy, dz, c, false));
+      // How dark the sky is here: nothing shows against a sky brighter than this.
+      const dark = 1 - Math.min((0.3 * c[0] + 0.5 * c[1] + 0.2 * c[2]) / 0.3, 1);
+      if (dark <= 0.05) continue;
+      // A few bright ones, many faint: and none so small that a headset cannot draw it.
+      const bright = (0.26 + 0.74 * size * size * size) * dark;
+      const half = ((0.075 + 0.1 * size) * Math.PI) / 180;
+      const [side, up] = tangent(dx, dy, dz);
+      const first = position.length / 3;
+      // Blue-white mostly; one in five is warm.
+      const hue = tint < 0.2 ? [1, 0.82, 0.62] : [0.86, 0.92, 1];
+      lit[0] = Math.min(c[0] + bright * hue[0], 1);
+      lit[1] = Math.min(c[1] + bright * hue[1], 1);
+      lit[2] = Math.min(c[2] + bright * hue[2], 1);
+      position.push(dx, dy, dz);
+      color.push(lit[0], lit[1], lit[2]);
+      for (const [u, v] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+        position.push(dx + (side[0] * u + up[0] * v) * half, dy + (side[1] * u + up[1] * v) * half, dz + (side[2] * u + up[2] * v) * half);
+        color.push(c[0], c[1], c[2]);
+      }
+      for (let k = 0; k < 4; k++) index.push(first, first + 1 + k, first + 1 + ((k + 1) % 4));
+      stars++;
+    }
+    this.starCount = stars;
+
+    // The moon: a pale disc, a little darker toward its limb and marked with its seas, and
+    // a ring of its light on the haze round it, which fades into the sky.
+    {
+      const m = W.MOON_DIR;
+      const [side, up] = tangent(m[0], m[1], m[2]);
+      const spokes = 20;
+      const R = (W.MOON.radius * Math.PI) / 180;
+      const first = position.length / 3;
+      const at = (r, a) => [m[0] + (side[0] * Math.cos(a) + up[0] * Math.sin(a)) * r, m[1] + (side[1] * Math.cos(a) + up[1] * Math.sin(a)) * r, m[2] + (side[2] * Math.cos(a) + up[2] * Math.sin(a)) * r];
+      const face = [0.99, 0.94, 0.8];
+      // Its seas: a few soft dark patches, where they are on the real one near enough (the
+      // big ones in the upper left, as it is seen rising). x, y across the disc (the limb at
+      // 1), how far each reaches, how dark.
+      const SEAS = [[-0.34, 0.3, 0.4, 0.2], [0.12, 0.42, 0.3, 0.17], [-0.5, -0.12, 0.26, 0.14], [0.3, -0.05, 0.3, 0.12], [-0.05, -0.5, 0.22, 0.08]];
+      const shade = (x, y) => {
+        let v = 1;
+        for (const [sx, sy, reach, dark] of SEAS) v -= dark * Math.exp(-((x - sx) * (x - sx) + (y - sy) * (y - sy)) / (reach * reach));
+        // And it dims a little toward its limb.
+        return v * (1 - 0.1 * (x * x + y * y));
+      };
+      // Rings: the middle, three across the face, the limb, just outside it (the first of
+      // its light on the haze), and where that has faded into the sky.
+      position.push(m[0], m[1], m[2]);
+      color.push(face[0] * shade(0, 0), face[1] * shade(0, 0), face[2] * shade(0, 0));
+      const ringsAt = [[0.3, 'face'], [0.62, 'face'], [0.97, 'face'], [1.06, 'glow'], [2.7, 'sky']];
+      for (const [f, kind] of ringsAt) {
+        for (let k = 0; k < spokes; k++) {
+          const a = ((k + (kind === 'face' && f === 0.62 ? 0.5 : 0)) / spokes) * Math.PI * 2;
+          const p = at(R * f, a);
+          position.push(p[0], p[1], p[2]);
+          const pl = Math.hypot(p[0], p[1], p[2]);
+          W.toDisplay(W.skyColor(p[0] / pl, p[1] / pl, p[2] / pl, c, false));
+          if (kind === 'face') {
+            const v = shade(f * Math.cos(a), f * Math.sin(a));
+            color.push(face[0] * v, face[1] * v, face[2] * v * (1 - 0.04 * f));
+          } else if (kind === 'glow') {
+            color.push(c[0] + (face[0] - c[0]) * 0.3, c[1] + (face[1] - c[1]) * 0.3, c[2] + (face[2] - c[2]) * 0.3);
+          } else {
+            color.push(c[0], c[1], c[2]);
+          }
+        }
+      }
+      for (let k = 0; k < spokes; k++) {
+        const j = (k + 1) % spokes;
+        index.push(first, first + 1 + k, first + 1 + j);
+        for (let r = 0; r + 1 < ringsAt.length; r++) {
+          const a0 = first + 1 + r * spokes + k;
+          const a1 = first + 1 + r * spokes + j;
+          index.push(a0, a0 + spokes, a1, a1, a0 + spokes, a1 + spokes);
+        }
+      }
+    }
+
     // The far ranges, painted on the sky: three lines of mountains one behind the other, the
     // farthest first so that each nearer one is drawn over it (all of the sky is at one depth,
     // and is drawn in the order it is listed here). Each is dark along its crest and fades
@@ -254,8 +360,10 @@ export class Stage {
       }
     };
     const DISC = SUN_DISC;
-    const GLOW_OUT = 38;
-    rings([0, DISC * 0.6, DISC * 0.94, DISC * 1.04, DISC * 1.35, DISC * 1.9, 6, 8, 11, 15, 20, 27, GLOW_OUT], 0, (deg) => {
+    // (No wider than it can be seen: at 26 degrees out it would add less than a hundredth,
+    // and every pixel it covers is a pixel blended. It went out to 38.)
+    const GLOW_OUT = 26;
+    rings([0, DISC * 0.6, DISC * 0.94, DISC * 1.04, DISC * 1.35, DISC * 1.9, 6, 8, 11, 14.5, 19, GLOW_OUT], 0, (deg) => {
       if (deg < DISC) {
         // The disc: white-gold, a little deeper toward its limb.
         const limb = deg / DISC;
@@ -475,15 +583,21 @@ export class Stage {
 
   /**
    * Mist lying on the lake: one coarse sheet a few metres over the water (see mistMaterial).
-   * It ends where the land comes up through it, and well short of the ledge.
+   * It lies over the far half of the lake and the flats beyond its far end, toward the sun:
+   * that is where mist is seen, lit from behind, and from the ledge that is a thin band of
+   * the picture. (It first covered the whole lake and the valley floor under the ledge: drawn
+   * alone and counted, that was half of what an eye sees when it looks down at the lake, all
+   * of it blended, for a veil that could hardly be told from the haze that costs nothing.
+   * The near water is the better for being a clear mirror.) It ends where the land comes up
+   * through it.
    */
   buildMist() {
     const L = W.LAKE;
     const y = W.LAKE_LEVEL + MIST_HEIGHT;
     const cell = 32;
-    const p0 = -Math.ceil((L.a + 60) / cell);
-    const p1 = Math.ceil((L.a + 150) / cell); // further toward the sun than toward the ledge
-    const q1 = Math.ceil((L.b + 70) / cell);
+    const p0 = -1; // from just short of the middle of the lake...
+    const p1 = Math.ceil((L.a + 150) / cell); // ...to well beyond its far end
+    const q1 = Math.ceil((L.b + 55) / cell);
     const position = [];
     const edge = [];
     const index = [];

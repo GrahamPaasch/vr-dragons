@@ -568,6 +568,30 @@ export function skyColor(dx, dy, dz, out, glow) {
 }
 
 /**
+ * The moon: nearly full, and up in the east since before the sun began to set, as it is at this
+ * time of the month. It stands opposite the sun (so behind the viewer and a little to their
+ * right, over the trees at the back of the ledge: where the dragons come from when they swoop
+ * over), drawn a good deal bigger than life, as the sun is. Painted on the sky (scene.js).
+ *   azimuth    degrees to the RIGHT of straight behind the viewer
+ *   elevation  degrees above the horizon: clear of the treetops behind, which reach 20
+ *   radius     of its disc, degrees
+ */
+export const MOON = { azimuth: SUN_AZIMUTH / DEG + 2, elevation: 26, radius: 2.0 };
+/** A unit vector toward the moon. */
+export const MOON_DIR = (() => {
+  const az = MOON.azimuth * DEG;
+  const el = MOON.elevation * DEG;
+  return [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+})();
+
+/**
+ * The first stars: how many are tried, and where they may be. Only where the sky has gone
+ * dark enough to show one (well up, and well round from the sun), and brighter the darker it
+ * is there.
+ */
+export const STARS = { count: 150, least: 18, fromSun: 62 };
+
+/**
  * The far ranges: three lines of mountains beyond everything that is built, one behind the
  * other, each paler than the one in front. They are what makes the valley one valley in a big
  * country. Nothing is built for them: they are painted on the sky (scene.js, buildSky), so
