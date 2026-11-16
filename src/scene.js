@@ -547,7 +547,12 @@ export class Stage {
     reflection.wrapS = reflection.wrapT = THREE.ClampToEdgeWrapping;
     reflection.needsUpdate = true;
     const noise = new THREE.DataTexture(bakeNoise(64), 64, 64, THREE.RGBAFormat);
-    noise.magFilter = noise.minFilter = THREE.LinearFilter;
+    // With its smaller copies: far out, where one pixel of a headset is a metre of water and
+    // twenty of this texture's texels, the glints on the lake must run together into a steady
+    // glow, not flicker from frame to frame as the head moves.
+    noise.magFilter = THREE.LinearFilter;
+    noise.minFilter = THREE.LinearMipmapLinearFilter;
+    noise.generateMipmaps = true;
     noise.wrapS = noise.wrapT = THREE.RepeatWrapping;
     noise.needsUpdate = true;
 

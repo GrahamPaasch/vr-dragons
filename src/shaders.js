@@ -346,10 +346,12 @@ export function waterMaterial(shared, reflection, noise, bounds) {
         vec4 r = texture2D(uReflection, vUv + (swell - 0.5) * 0.006);
         // Small waves, long across the line of sight, running toward the bluff: where two of
         // them cross, a crest throws the sun at the eye.
-        vec2 crest = texture2D(uNoise, vWorld * vec2(0.085, 0.29) + vec2(uTime * 0.021, uTime * 0.083)).rg;
+        vec2 crest = texture2D(uNoise, vWorld * vec2(0.085, 0.29) + vec2(uTime * 0.021, uTime * 0.083), -0.7).rg;
         // The sun's path: molten down its middle, breaking up into glints toward its edges
         // (r.a is how far into the path this water is: the further in, the more crests catch).
-        float glint = smoothstep(0.42 - 0.3 * r.a, 0.5 - 0.3 * r.a, crest.r * crest.g + 0.12 * (swell.r - 0.5));
+        // Far out the crests are too small to be told apart (the texture's smaller copies see
+        // to that), and there the middle of the path is one unbroken band of light.
+        float glint = smoothstep(0.5 - 0.52 * r.a, 0.57 - 0.52 * r.a, crest.r * crest.g + 0.12 * (swell.r - 0.5));
         vec3 c = r.rgb * (0.94 + 0.12 * swell.g) + vec3(1.0, 0.62, 0.24) * (r.a * r.a * 0.55);
         // (Less of the haze than the land gets: the mist on the lake is drawn by itself, in
         // banks, and between them the water is a dark mirror.)

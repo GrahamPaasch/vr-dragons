@@ -782,6 +782,8 @@ const AWAY_AFTER = 210;
 const OPENING = ['far turn', 'sweep', 'turn', 'eight', 'stoop', 'rise'];
 /** How far along the first lane the pair starts (metres). */
 const OPENING_START = 150;
+/** When the big one first roars (seconds in): 90 m out and coming, a little to the left of the sun. */
+const OPENING_ROAR = 9.2;
 
 // ---------------------------------------------------------------------------------------------
 // The flyer
@@ -1258,7 +1260,11 @@ export class Director {
     this.calls = 0; // how many have been answered
     this.callAt = -100;
     this.busyAt = -100;
-    this.nextRoar = 9 + rng() * 6;
+    // The first roar is part of the opening: the big one, as the two come in over the near
+    // end of the lake under the sun, its fire against the sunset. After that, now and then.
+    rng();
+    this.nextRoar = OPENING_ROAR;
+    this.roars = 0;
     this.events = [];
     this.spare = [];
     this.wants = [0, 0, 0, 0, 0, null];
@@ -1640,15 +1646,17 @@ export class Director {
     // one above the other, passing, and circling each other are all this one rule with the
     // axis held sideways, held upright, or turning.
     if (this.mode.name === 'helix') this.axis = wrap(this.axis + HELIX_RATE * this.mode.side * dt);
-    else if (want[5] !== null) this.axis = wrap(this.axis + clamp(wrap(want[5] - this.axis), -0.7 * dt, 0.7 * dt));
+    else if (want[5] !== null) this.axis = wrap(this.axis + clamp(wrap(want[5] - this.axis), -1.1 * dt, 1.1 * dt));
     // How close they really are along the lane (not how close they are meant to be).
     const between = this.on[0] && this.on[1] ? Math.abs(this.along[0] - this.along[1]) : Math.abs(this.gap);
     const apart = STAND_OFF * room * clamp(1 - Math.min(between, Math.abs(this.gap)) / (20 * room), 0, 1);
 
     // Roars: now and then from a distance, and from one that has been called.
     if (this.time > this.nextRoar) {
-      const who = this.rng() < 0.5 ? 0 : 1;
+      const chance = this.rng() < 0.5 ? 0 : 1;
+      const who = this.roars === 0 ? 0 : chance;
       if (!this.jobs[who]) this.roar(who, 'far');
+      this.roars++;
       this.nextRoar = this.time + 38 + this.rng() * 50;
     }
 
@@ -1822,6 +1830,7 @@ export class Director {
       if (hang[3] > CLOSE_LANE) continue;
       const w = 1 - smoothstep(0.6 * CLOSE_LANE, CLOSE_LANE, hang[3]);
       const c = this.carrots[i];
+      const other = this.jobs[1 - i] ? null : this.carrots[1 - i];
       const vx = VIEWER[0] - hang[0];
       const vz = VIEWER[2] - hang[2];
       const vd = Math.hypot(vx, vz);
@@ -1830,11 +1839,20 @@ export class Director {
         if (inward > 0) {
           c[0] -= (vx / vd) * inward * w;
           c[2] -= (vz / vd) * inward * w;
+          // What this one may not fly, the other flies for it, the other way: the two are
+          // then as far apart as they were asked to be.
+          if (other) {
+            other[0] -= (vx / vd) * inward * w;
+            other[2] -= (vz / vd) * inward * w;
+          }
         }
       }
       const over = hang[1] - VIEWER[1];
-      if (over > 0 && c[1] < hang[1]) c[1] = lerp(c[1], hang[1], w);
-      else if (over < -3 && c[1] > hang[1]) c[1] = lerp(c[1], hang[1], w);
+      let lift = 0;
+      if (over > 0 && c[1] < hang[1]) lift = (hang[1] - c[1]) * w;
+      else if (over < -3 && c[1] > hang[1]) lift = (hang[1] - c[1]) * w;
+      c[1] += lift;
+      if (other) other[1] += lift;
     }
 
     for (let i = 0; i < 2; i++) {
