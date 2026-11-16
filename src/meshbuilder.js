@@ -65,13 +65,14 @@ export class MeshBuilder {
     return this;
   }
 
-  /** A four-sided face a-b-c-d (counter-clockwise), as two triangles. */
-  quad(a, b, c, d, color, aux) {
-    if (Array.isArray(color[0]) || (aux && Array.isArray(aux[0]))) {
+  /** A four-sided face a-b-c-d (counter-clockwise), as two triangles. `normals`: four, or none. */
+  quad(a, b, c, d, color, aux, normals) {
+    if (Array.isArray(color[0]) || (aux && Array.isArray(aux[0])) || normals) {
       const col = Array.isArray(color[0]) ? color : [color, color, color, color];
       const x = aux && Array.isArray(aux[0]) ? aux : [aux || ZERO4, aux || ZERO4, aux || ZERO4, aux || ZERO4];
-      this.tri(a, b, c, [col[0], col[1], col[2]], [x[0], x[1], x[2]]);
-      this.tri(a, c, d, [col[0], col[2], col[3]], [x[0], x[2], x[3]]);
+      const n = normals;
+      this.tri(a, b, c, [col[0], col[1], col[2]], [x[0], x[1], x[2]], n ? [n[0], n[1], n[2]] : undefined);
+      this.tri(a, c, d, [col[0], col[2], col[3]], [x[0], x[2], x[3]], n ? [n[0], n[2], n[3]] : undefined);
     } else {
       this.tri(a, b, c, color, aux);
       this.tri(a, c, d, color, aux);
@@ -85,10 +86,42 @@ export class MeshBuilder {
    * faces point outward when the rings advance along +z and wind x -> y).
    * colorAt(k, i) and auxAt(k, i) give the value for ring k, point i (corner values), or for a
    * face when `faceColor` is set: faceColor(k, i) colours the whole quad between rings k, k+1.
+   * `round`: light it as a round body and not as a faceted one: every point of a ring gets a
+   * normal that points out from the middle of its ring (leaning along the loft where the
+   * loft narrows or widens), shared by the faces that meet there.
    */
   loft(rings, options) {
     const o = options || {};
     const n = rings[0].length;
+    let normals = null;
+    if (o.round) {
+      const mids = rings.map((ring) => {
+        const m = [0, 0, 0];
+        for (const p of ring) {
+          m[0] += p[0] / n;
+          m[1] += p[1] / n;
+          m[2] += p[2] / n;
+        }
+        return m;
+      });
+      normals = rings.map((ring, k) => {
+        const a = mids[Math.max(k - 1, 0)];
+        const b = mids[Math.min(k + 1, rings.length - 1)];
+        const axis = normalize([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+        const before = rings[Math.max(k - 1, 0)];
+        const after = rings[Math.min(k + 1, rings.length - 1)];
+        return ring.map((p, i) => {
+          const out = [p[0] - mids[k][0], p[1] - mids[k][1], p[2] - mids[k][2]];
+          const reach = Math.hypot(out[0], out[1], out[2]) || 1;
+          // How fast the body widens along its length here: the normal leans back by that.
+          const r0 = Math.hypot(before[i][0] - a[0], before[i][1] - a[1], before[i][2] - a[2]);
+          const r1 = Math.hypot(after[i][0] - b[0], after[i][1] - b[1], after[i][2] - b[2]);
+          const run = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) || 1;
+          const lean = (r1 - r0) / run;
+          return normalize([out[0] / reach - axis[0] * lean, out[1] / reach - axis[1] * lean, out[2] / reach - axis[2] * lean]);
+        });
+      });
+    }
     for (let k = 0; k + 1 < rings.length; k++) {
       const r0 = rings[k];
       const r1 = rings[k + 1];
@@ -97,7 +130,7 @@ export class MeshBuilder {
         const flat = o.faceColor ? o.faceColor(k, i) : null;
         const col = flat || [o.colorAt(k, i), o.colorAt(k, j), o.colorAt(k + 1, j), o.colorAt(k + 1, i)];
         const aux = o.auxAt ? [o.auxAt(k, i), o.auxAt(k, j), o.auxAt(k + 1, j), o.auxAt(k + 1, i)] : o.aux;
-        this.quad(r0[i], r0[j], r1[j], r1[i], col, aux);
+        this.quad(r0[i], r0[j], r1[j], r1[i], col, aux, normals ? [normals[k][i], normals[k][j], normals[k + 1][j], normals[k + 1][i]] : undefined);
       }
     }
     if (o.capStart) this.cap(rings[0], true, o.capStart, o.capStartAux || o.aux);

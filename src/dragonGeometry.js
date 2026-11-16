@@ -70,17 +70,21 @@ export function buildDragon(build, colors) {
     [1, 0], [0.74, 0.62], [0, 1.12], [-0.74, 0.62], [-1, 0], [-0.8, -0.72], [0, -1], [0.8, -0.72],
   ];
   const rings = stations.map((st) => shape.map(([cx, cy]) => P(cx * st[2], st[1] + cy * (cy > 0 ? st[3] : st[4]), st[0])));
-  const bodyColor = (i) => {
-    // Faces between outline points i and i+1: 1, 2 are the back; 5, 6 the belly; the rest flanks.
-    if (i === 1 || i === 2) return colors.back;
-    if (i === 5 || i === 6) return colors.belly;
-    return colors.side;
-  };
+  // The hide: dark along the back, the flank's colour down the sides, pale under the belly,
+  // running into one another round the body, with a band a little darker at every other
+  // station (the plates of its back and belly) and a mottle over all of it. It is lit as a
+  // round body: a creature seen from 12 m should not look folded out of card.
+  const mix = (a, c, t) => [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t, a[2] + (c[2] - a[2]) * t];
+  const AROUND = [
+    colors.side, mix(colors.back, colors.side, 0.45), colors.back, mix(colors.back, colors.side, 0.45),
+    colors.side, mix(colors.side, colors.belly, 0.7), colors.belly, mix(colors.side, colors.belly, 0.7),
+  ];
   m.loft(rings, {
-    faceColor: (k, i) => scaleColor(bodyColor(i), 0.88 + 0.24 * hash2(k * 8 + i, 5)),
+    colorAt: (k, i) => scaleColor(AROUND[i], (k % 2 ? 0.86 : 1.02) * (0.93 + 0.14 * hash2(k * 8 + i, 5))),
     auxAt: (k) => two(stations[k][5], stations[k][6], stations[k][7]),
     capEnd: colors.side,
     capEndAux: one(BONE.head),
+    round: true,
   });
 
   // -------------------------------------------------------------------------------------------
@@ -304,6 +308,7 @@ export function buildFlame(build) {
     vertices: position.length / 3,
     triangles: position.length / 9,
     length: 9.5 * s,
+    mouth,
   };
 }
 
@@ -316,9 +321,9 @@ export const DRAGONS = [
     colors: {
       back: [0.56, 0.1, 0.06],
       side: [0.74, 0.18, 0.07],
-      belly: [0.93, 0.66, 0.26],
-      wingTop: [0.64, 0.15, 0.07],
-      wingUnder: [0.9, 0.4, 0.12],
+      belly: [0.86, 0.56, 0.2],
+      wingTop: [0.62, 0.13, 0.07],
+      wingUnder: [0.8, 0.22, 0.09],
       bone: [0.3, 0.07, 0.05],
       horn: [0.14, 0.1, 0.09],
       eye: [1.0, 0.85, 0.2],
@@ -333,9 +338,9 @@ export const DRAGONS = [
     colors: {
       back: [0.1, 0.42, 0.48],
       side: [0.12, 0.5, 0.54],
-      belly: [0.82, 0.88, 0.78],
-      wingTop: [0.2, 0.62, 0.62],
-      wingUnder: [0.5, 0.8, 0.76],
+      belly: [0.56, 0.68, 0.62],
+      wingTop: [0.13, 0.5, 0.56],
+      wingUnder: [0.22, 0.64, 0.7],
       bone: [0.05, 0.16, 0.22],
       horn: [0.86, 0.84, 0.74],
       eye: [1.0, 0.6, 0.1],

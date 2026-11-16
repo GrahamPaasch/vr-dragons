@@ -461,9 +461,15 @@ export function leafMaterial(shared, box) {
 
 /**
  * A dragon. The vertex shader moves each vertex with its one or two bones (rig.js works the
- * bones out; they arrive as three rows of four numbers each), lights it, and lets the low sun
- * shine through the wing membranes. `mirror` makes the dimmer material used for the dragon's
- * image in the lake.
+ * bones out; they arrive as three rows of four numbers each) and lights it. `mirror` makes the
+ * dimmer material used for the dragon's image in the lake.
+ *
+ * The light is the look of the piece: the sun is behind the valley, so a dragon out in front is
+ * seen against it. It is dark where the sun does not reach (the dusk lights that side, no more),
+ * its edges catch the sun (a rim of fire along whatever is turned away from the eye, strongest
+ * looking into the sun), and its wings are lanterns: the membranes let the sun through, in
+ * their own colour, more the more squarely it strikes them from behind. While it breathes
+ * fire (uFire, 0..1) the fire lights its own head, neck and breast.
  */
 export function dragonMaterial(shared, bones, options) {
   const o = options || {};
@@ -475,6 +481,9 @@ export function dragonMaterial(shared, bones, options) {
         uBones: { value: bones },
         uSunlit: { value: 1 },
         uAlpha: { value: 0.5 },
+        uFire: { value: 0 },
+        // Where the fire leaves the mouth, in the dragon's rest pose (x, y, z), and its size.
+        uMouth: { value: new THREE.Vector4(0, 0.6, 5.6, 1) },
       },
       shared
     ),
@@ -486,6 +495,8 @@ export function dragonMaterial(shared, bones, options) {
       ${COMMON}
       uniform vec4 uBones[DV_BONES];
       uniform float uSunlit;
+      uniform float uFire;
+      uniform vec4 uMouth;
       attribute vec4 aux;
       varying vec3 vColor;
 
@@ -507,9 +518,23 @@ export function dragonMaterial(shared, bones, options) {
         n = normalize(mat3(modelMatrix) * n);
         float membrane = step(0.5, aux.w) * step(aux.w, 1.5);
         float glow = step(1.5, aux.w);
-        vec3 c = color * dvLight(n, uSunlit);
-        // The sun behind a wing lights it up like a paper lantern.
-        c += color * uSunColor * (max(-dot(n, uSunDir), 0.0) * 0.9 * membrane * uSunlit);
+        vec3 toEye = normalize(cameraPosition - wp.xyz);
+        // How nearly the eye is looking into the sun, past this point: 1 straight into it.
+        float into = max(-dot(toEye, uSunDir), 0.0);
+        // The sun on what faces it, with a tighter edge than on the land; the dusk on the rest.
+        float lit = max((dot(n, uSunDir) + 0.14) / 1.14, 0.0) * uSunlit;
+        vec3 c = color * (mix(uBounceColor, uSkyColor, n.y * 0.5 + 0.5) * 1.15 + uSunColor * lit);
+        // The wings as lanterns: the sun through the membrane, in the membrane's own colour.
+        float behind = max((-dot(n, uSunDir) + 0.22) / 1.22, 0.0);
+        vec3 through = color * (uSunColor * 0.3 + vec3(0.75)) * (behind * (0.3 + 0.95 * into * into));
+        c += through * (membrane * uSunlit);
+        // The rim: the sun catching every edge that is turned away from the eye.
+        float edge = 1.0 - abs(dot(n, toEye));
+        edge *= edge * edge;
+        c += (uSunColor * (0.3 + 0.7 * color)) * (edge * (0.1 + 0.42 * into) * uSunlit * (1.0 - 0.6 * membrane));
+        // Its own fire on its face, neck and breast.
+        vec3 fromMouth = (position - uMouth.xyz) / uMouth.w;
+        c += (color + 0.04) * vec3(4.2, 1.5, 0.3) * (uFire / (1.0 + 0.3 * dot(fromMouth, fromMouth)));
         c = mix(c, color * 5.0, glow);
         #ifdef DV_MIRROR
           c *= 0.55;

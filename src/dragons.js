@@ -69,6 +69,8 @@ export class DragonView {
 
     // Its fire: one more draw call, and only while it is breathing.
     const fire = buildFlame(spec.build);
+    // (The fire lights the dragon's own face: the materials are told where the mouth is.)
+    for (const material of [this.material, this.mirrorMaterial]) material.uniforms.uMouth.value.set(fire.mouth[0], fire.mouth[1], fire.mouth[2], this.scale);
     const fg = new THREE.BufferGeometry();
     fg.setAttribute('position', new THREE.BufferAttribute(fire.position, 3));
     fg.setAttribute('dir', new THREE.BufferAttribute(fire.dir, 3));
@@ -129,6 +131,8 @@ export class DragonView {
 
     // Fire, while it roars: carried by the head.
     this.fire = firePower(f.roar);
+    this.material.uniforms.uFire.value = this.fire;
+    this.mirrorMaterial.uniforms.uFire.value = this.fire;
     this.flame.visible = this.fire > 0.01;
     if (this.flame.visible) {
       const s = this.skin;
