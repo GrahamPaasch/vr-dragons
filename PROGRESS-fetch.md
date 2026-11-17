@@ -7,7 +7,7 @@ Deploy: copy into ~/personal-webpage/public/vr/dragons..., commit, `git push` (V
 - [x] 1. Versions: git tag v2 (cf0efa2) + v1 (personal-webpage ec56829 = v1 as it was live). Live layout:
       /vr/dragons = newest (v3 fetch), /vr/dragons/v1, /vr/dragons/v2 as frozen copies; a versions list on the page.
 - [x] 2. Legs test page live at /vr/dragons/legs, emailed 11/17 (reply in thread 1a1e935fe36f477a, sent 1a1ea24c3bc30299). CHECK GMAIL for "old"/"new" between milestones: gmail list --query "newer_than:1d from:me legs OR old OR new".
-- [ ] 3. Fetch (spec 36).
+- [x] 3. Fetch (spec 36).
 - [ ] 4. tests, perf, deploy, curl 200.
 - [ ] DONE: RESULT-fetch.md, email, memory append.
 
@@ -25,3 +25,6 @@ Deploy: copy into ~/personal-webpage/public/vr/dragons..., commit, `git push` (V
   steerClear so no flying body within ~13 m of the head). flight.js hooks: director.game, sendPast, wideLook, Flyer leg fields.
   tools/fetchsim.mjs (FETCH_STATS=8 for a matrix). DRAGONS legs = LEGS const ('old' until he picks).
   NEXT: perch offer reach (Ember), then rendering (ball/glow/trail, splash, spire in ledge mesh, hands), input (grip/A), audio, flat throw.
+- 3 DONE: fetch built + tested (fetchsim 192/192, nearest 13.6 m), pictures via tools/fetchshots.mjs. Commits up to 1d4128a.
+- 4: tests 58 pass, smoke 46 pass, perf worst 62 calls both eyes (31/eye), 84k tris. personal-webpage e681618 pushed
+  (root v3 + v1 + v2 + legs; STATIC_APP_DIRS += vr/dragons/v1, v2). NEXT: wait Vercel, curl 200, live smoke, email, memory.
