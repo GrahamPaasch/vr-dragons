@@ -12,6 +12,76 @@ It is a WebXR page, built for the Oculus Quest 1 and anything newer, with a flat
 laptops and phones. One static folder, no build step, nothing loaded from anywhere else: three.js
 is vendored, and every shape and every sound is made by the code in `src/`.
 
+**Versions.** `/vr/dragons` is always the newest; the older ones stay where they were, frozen, and
+every one lists the others on its opening card: v3 *Fetch* (this one), v2 *Dusk* at
+`/vr/dragons/v2` (git tag `v2`), v1 *Afternoon*, the bright first one, at `/vr/dragons/v1` (tag
+`v1`, as it was live). The list is `versions.js`; a new version is added there once.
+
+## Version 3: fetch
+
+A ball, and two dragons that play fetch with it, like a dog. The spec is
+`~/claude/voice-ui/specs/36-dragon-fetch.md`. There is no score and nothing is counted.
+
+- **The ball** is a glowing amber orb a metre across, with darker veins of amber turning in it,
+  resting on the rock beside you. It is its own light; round it is a soft disc of added light
+  that never gets smaller than about a degree across, so that 200 m out over the dusk it is still
+  a spark to follow, and it draws a faint trail as it flies.
+- **Throwing.** Grip to pick it up (reach down: it is on the ground), let go of the grip to
+  throw. It leaves the hand about four times as fast as the hand was moving at the speeds a
+  hand moves throwing in a headset, a little less for the hardest throws: a soft lob drops just
+  off the ledge, an easy throw lands 40 to 70 m out on the grass at the foot of the bluff, and a
+  hard one (8 to 10 m/s at the controller) sails 80 to 100 m into the lake. (`throwSpeed` in
+  `src/fetch.js`.)
+- **Both race for it.** Tarn, the small quick one, wins most short throws; Ember, the big one,
+  most long ones (over 192 simulated throws: Tarn 51 of 64 lobs and 46 of 64 easy throws, Ember
+  40 of 64 hard ones). Whichever can get its mouth to the ball while it is still in the air
+  swoops and takes it there (half of easy-to-hard throws are caught in the air). The swoop is a
+  planned path, from where the dragon is at the speed it is going to where its jaws meet the
+  ball, flown only if it has the pull for it, keeps clear of the ground, and never comes at the
+  ledge: the dragon comes out of it turning away.
+- **Missed, it fetches it from where it fell.** From the lake: a splash, the ball floats and
+  glows, a dragon comes down over it, beats at the water and scoops it out. From open ground: it
+  lands on its feet, breathes fire at the sky for joy (the trees do not burn), puts its head
+  down and picks the ball up. From the trees or a steep slope: it hovers down and plucks it out.
+  A soft lob that drops down the cliff below the ledge is always fetched from the ground: nothing
+  can snatch it there and stay clear of the cliff and of you.
+- **Home, two ways; A switches** (X on the left controller), and a line on the rim says which:
+  - *Exercise* (the first): it glides past the ledge the way a called dragon does and tosses
+    the ball so that it lands a stride short of your feet and rolls to a stop at them. Every
+    throw is a squat and a full throw.
+  - *Perch*: it comes in along the bluff from your right, lands on the rock spire beside the
+    ledge, turns to you, folds its wings, and swings its head over to your chest with the ball
+    in its jaws; take it out of them with the grip. (The neck and head are found by search, for
+    each dragon: within 8 cm of where a hand takes it.)
+- **Between throws** the two circle close in front of the ledge, on opposite sides of a ring
+  whose near side is 24 m out, heads following the ball in your hand. Left for 45 s with nothing
+  thrown they lose interest and go back to flying the valley, until you pick the ball up (or hold
+  it up over your head) again.
+- **A fake.** Swing without letting go: both lunge out after nothing, pull up, and look back
+  over their shoulders at you with a grunt.
+- **The safety net.** A ball that lies out there for 20 s with no dragon picking it up (or is
+  carried about for more than 75 s, or is lost) is replaced by a fresh one in your hand. In 192
+  simulated throws it was never needed.
+- **The trigger** calls a dragon exactly as before.
+
+Keeping clear of you, which the lanes were drawn for, the game had to learn: every point a
+playing dragon chases is kept 26 m out from the ledge in plan, one flying in at the ledge low
+by the cliff is turned out well before it gets there, and if its path would still come within
+22 m of your head it is taken off the wing into a planned turn away. Over 192 simulated throws
+the nearest any flying dragon's body came was 13.6 m (the rule was 11 m). Perched on the spire
+it is close on purpose: that is the point of it.
+
+Off the wing (landing, standing, hovering, the swoop, the veer) a dragon is placed and posed by
+`src/fetch.js` along smooth paths that start at the speed it was flying and end at the speed it
+should have, and handed back to the flight model where it left off. For that the dragons have
+been given legs that can be let down, thrust forward to land, bent to crouch and to spring, wings
+that fold at their sides, and a neck that can be raised and stretched.
+
+**The legs.** The first legs were a thin stalk on one bone, and landing and perching put them on
+show. New ones are built (a heavy thigh out of the flank, a knee, a shin, a long foot and four
+toes with hooked talons, three bones a leg, 300 triangles a dragon), and the two can be seen side
+by side at `/vr/dragons/legs`; `LEGS` in `src/dragonGeometry.js` says which this page uses.
+
 ## Version 2: the look
 
 The first version worked and looked like a toy: a bright flat afternoon, every colour at full
@@ -78,10 +148,16 @@ of the ledge about the trigger comes back when the dragons are far off, until yo
 one. You are never moved after that first moment: there is no thumbstick walking and no
 teleport, on purpose. The dragons do the moving.
 
+For fetch (above): **grip** to pick up the ball, let go of the grip to throw it; **A** (or X)
+switches how they bring it back. There is a small mitten on each controller to reach with.
+
 **On a flat screen.** Press **Watch here**. The view follows the dragons until you drag to look
 around (it goes back to following when left alone); on a phone held upright it turns as fast as
 they pass and opens its lens when one is close. Tap the picture, or press Space, to call a
-dragon. M turns the sound off and on (off, it is not worked out at all).
+dragon. Hold **T** (or the Throw button) to throw the ball the way you are looking: a tap is a
+lob, a second and a half as hard as anybody throws. **A** (or its button) switches exercise and
+perch; from a flat screen the ball comes back to the rock either way. M turns the sound off and
+on (off, it is not worked out at all).
 
 Sound matters here; headphones are best. It starts with your first tap, as browsers require.
 
@@ -213,11 +289,18 @@ is bad at (pixels, draw calls) and leans on what it has to spare (vertices):
 Measured by `npm run perf` over four minutes of flight with the head turned every way, both eyes
 of an emulated Quest 1 together:
 
-| | draw calls | triangles | version 1, as it was live |
-|---|---|---|---|
-| mean | 36 to 43 | 67,000 to 72,000 | 33 to 38; 54,000 to 58,000 |
-| worst frame | 52 (26 an eye) | 82,000 (41,000 an eye) | 48; 69,000 |
-| everything at once, nothing culled | 37 an eye | 45,000 an eye | 34; 37,000 |
+| | draw calls | triangles | version 2 | version 1, as it was live |
+|---|---|---|---|---|
+| mean | 40 to 48 | 68,000 to 73,000 | 36 to 43; 67,000 to 72,000 | 33 to 38; 54,000 to 58,000 |
+| worst frame | 62 (31 an eye) | 84,000 (42,000 an eye) | 52; 82,000 | 48; 69,000 |
+| everything at once, nothing culled | 44 an eye | 46,000 an eye | 37; 45,000 | 34; 37,000 |
+
+Fetch costs four or five draw calls an eye over version 2 and about 1,500 triangles: the ball
+(320 triangles) and the glow round it, always, and in the headset a mitten on each controller.
+While the ball flies its trail is one more, and a splash is one more for the two seconds it
+lasts (two at most at once): 34 an eye at the very worst. The spire is part of the ledge's mesh
+and costs nothing. Nineteen shader programs now (version 2 had fourteen), all made while the page
+loads; the lines of words in the headset are one picture between them.
 
 Of that difference, one draw call an eye and 2,500 triangles are the big trees by the creek and
 the line of words in the headset, which came between the two versions. The look itself is two
@@ -262,6 +345,11 @@ SMOKE_URL=https://www.grahampaasch.com/vr/dragons npm run smoke    # the same ag
 npm run perf         # draw calls and triangles per frame, and the pixels the see-through things cover
 npm run sound        # renders every sound offline and measures it (add -- --wav to write files)
 npm run fly -- 60 7 --calls --map    # fly an hour on seed 7 with calls: clearances, wingtips, restlessness; draw the paths
+node tools/fetchsim.mjs              # play fetch: 42 throws, both modes, a line each (how far, who, how, how long, how near)
+FETCH_STATS=8 node tools/fetchsim.mjs   # 192 throws on 8 seeds: who wins what, in the air or not, times, nearest pass
+node tools/fetchsim.mjs 10 0 perch   # one throw (hand m/s, degrees left, mode), every event
+node tools/fetchshots.mjs            # pictures of fetch: the ball at rest, circling, in flight, splash, thrash, fire, perch, toss
+node tools/legs-shots.mjs            # pictures of the legs test page (LEGS_CAM=x,y,z,tx,ty,tz for a camera anywhere)
 npm run shots        # pictures from the ledge into test-results/
 npm run sheet -- 15 64.5 144.5       # pictures of the flight at those seconds
 SHEET_ROAR=0 npm run sheet -- 58     # the same with the big dragon breathing fire
@@ -321,6 +409,8 @@ the tests as well as in the page.
 | `src/meshbuilder.js` | flat-shaded triangles into arrays: lofts, tubes, lumps |
 | `src/rig.js`, `src/dragonGeometry.js` | the dragons' skeleton, how it moves, and their shape |
 | `src/flight.js` | the lanes, the flight model, the director (and the staged opening), calling |
+| `src/fetch.js` | fetch: the ball and its physics, the race, swoops, landing, the lake and the trees, both ways home, the ring, boredom, fakes, the safety net, keeping clear of the viewer |
+| `src/ballView.js` | three.js: the ball, its glow and trail, splashes, the mittens |
 | `src/audio.js` | everything heard |
 | `src/governor.js` | holding the frame rate, within a session and from one to the next |
 | `src/shaders.js`, `src/scene.js`, `src/dragons.js` | three.js: materials (where the light, the haze and the grade are applied), the stage, drawing the dragons |
@@ -331,10 +421,15 @@ the lake is 46 m down.
 
 ## Deploying
 
-The site is `index.html`, `src/` and `vendor/`. `tools/deploy-copy.sh <folder>` copies exactly
-those. The page finds its own files from wherever it is served, with or without a trailing slash
-(the smoke test serves it at `/vr/dragons` the way the live site does). On grahampaasch.com it
-lives in `public/vr/dragons/`, with `vr/dragons` in `STATIC_APP_DIRS` in `next.config.mjs`.
+The site is `index.html`, `versions.js`, `src/` and `vendor/`, and the folders `v1/`, `v2/` (the
+older versions, frozen copies) and `legs/` (the legs test, on its own copy of the code: refresh it
+with `tools/legs-snapshot.sh`). `tools/deploy-copy.sh <folder>` copies exactly those. Each page
+finds its own files from wherever it is served, with or without a trailing slash (the smoke test
+serves them at `/vr/dragons`, `/vr/dragons/v2` and so on, the way the live site does). On
+grahampaasch.com it lives in `public/vr/dragons/`, with `vr/dragons`, `vr/dragons/v1`,
+`vr/dragons/v2` and `vr/dragons/legs` in `STATIC_APP_DIRS` in `next.config.mjs`. A new version:
+copy the root's `index.html`, `src/` and `vendor/` into `vN/` (its loader script then reads
+`../versions.js` with `data-current="vN"`), add it to `versions.js`, and to `STATIC_APP_DIRS`.
 
 ## Not done yet
 
@@ -349,9 +444,16 @@ lives in `public/vr/dragons/`, with `vr/dragons` in `STATIC_APP_DIRS` in `next.c
   changing, and the vignette two in `src/shaders.js`.
 - Listen to it. The sounds are built from descriptions of the real ones and balanced by
   measurement; the roar and the birds in particular want an ear, and so does the rush of the
-  swoop, which is new.
-- Hands. In VR there is nothing where your controllers are.
-- The dragons never land, and they do not react to where you look.
+  swoop, which is new. The sounds of fetch (splash, thud, the snap of jaws) have not been
+  measured by `npm run sound` at all yet.
+- Fetch has been played in a simulator (192 throws at a time) and in an emulated Quest 1, never
+  with a real arm: how hard a person really throws with a Touch controller, and so how far the
+  ball really goes, is the first thing to look at (`throwSpeed`). And whether a squat to the rock
+  for the ball is comfortable in a real room.
+- The dragons' feet do not grip the ball and do not walk: a dragon on the ground reaches for the
+  ball with its neck from where it landed. They do not land anywhere but where the ball is and on
+  the spire.
+- The ball has no image in the lake.
 - The lanes were drawn for the first, smaller pair. These two fly them more slowly and with
   more room round the ledge, but a figure of eight 58 m across is a tight thing for an animal
   20 m across: wider lanes would suit them better.
@@ -370,3 +472,5 @@ Inspired by a video of two dragons flying through a forest, and by October in Wi
 - For the tools only (never loaded by the page): [playwright-core](https://playwright.dev)
   (Apache 2.0) and [iwer](https://github.com/meta-quest/immersive-web-emulation-runtime) (MIT).
 - No models, textures, sound files or fonts: all of it is generated by the code here.
+
+**11/16 11:37 pm verdict (in the Quest, at bedtime):** 'you did exactly what I asked for... it's pretty shitty.' Specifics not given yet; ask what's worst before rebuilding.
