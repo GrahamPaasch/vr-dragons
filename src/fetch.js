@@ -63,14 +63,15 @@ export const REACH = BALL_RADIUS + 0.3;
 export const RING = { x: 0, y: -6, z: -53, radius: 29 };
 
 /**
- * How fast the ball leaves the hand for a hand moving this fast (m/s). About four times as
- * fast for a gentle throw, less for a hard one, so that a soft lob drops close in front of the
- * ledge, an easy throw lands 40 to 60 m out, and the hardest throw anybody makes standing in a
- * headset (12 to 18 m/s at the hand) sails 80 to 100 m out over the valley and into the lake.
+ * How fast the ball leaves the hand for a hand moving this fast (m/s): about four times as fast
+ * at the speeds a hand moves throwing in a headset (3 to 6 m/s at the controller), easing off
+ * above that, so that a soft lob drops close in front of the ledge, an easy throw lands 40 to
+ * 70 m out, and a hard one (8 to 10 m/s at the hand) sails 80 to 100 m out over the valley and
+ * into the lake. Nobody's throw goes much further than that.
  */
 export function throwSpeed(hand) {
   const h = Math.max(hand, 0);
-  return Math.min((4 * h) / (1 + h / 12), 32);
+  return Math.min((4 * h) / Math.sqrt(1 + (h / 9) * (h / 9)), 32);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -448,6 +449,8 @@ const SWOOP_SOONEST = 0.9;
 const SWOOP_NEAREST = 17;
 /** How far out from the viewer (in plan, metres) every point a playing dragon chases is kept. */
 const KEEP_CLEAR = 26;
+/** A playing dragon whose path will bring it this near the viewer's head in a second and a half is turned away off the wing (see veer). */
+const VEER_NEAR = 22;
 
 export class Fetch {
   /**
@@ -642,6 +645,7 @@ export class Fetch {
     const b = this.ball;
     const dir = this.director;
     if (b.state !== 'held' && b.state !== 'carried' && b.state !== 'offered') b.step(dt, this.events);
+    else b.age += dt;
     if (b.fresh < 1) b.fresh = Math.min(1, b.fresh + dt / 0.4);
 
     // Off the ledge and loose: both go after it.
@@ -658,12 +662,13 @@ export class Fetch {
     }
     if (b.home && b.state === 'flying' && b.y < this.head[1] - 6) b.home = false; // missed the ledge: loose
 
-    // The safety net.
-    const nobody = b.loose && this.claim < 0;
-    const stuck = this.claim >= 0 && this.d[this.claim].job === null && !dir.jobs[this.claim];
-    if (nobody || stuck) this.watch += dt;
-    else this.watch = 0;
-    if (b.state === 'lost' || this.watch > SAFETY_SECONDS) this.freshBall();
+    // The safety net: the ball lying out there (or floating) with no dragon picking it up, for
+    // twenty seconds, or carried about for over a minute, or gone: a fresh one.
+    const lying = b.state === 'ground' || b.state === 'floating';
+    const picking = this.claim >= 0 && !!this.d[this.claim].script;
+    if (lying && !picking) this.watch += dt;
+    else if (!lying) this.watch = 0;
+    if (b.state === 'lost' || this.watch > SAFETY_SECONDS || (b.state === 'carried' && b.age > 75)) this.freshBall();
 
     // Boredom: nothing thrown, nothing held up, for a while.
     const playing = this.claim >= 0 || b.loose || b.state === 'carried' || b.state === 'offered';
@@ -814,6 +819,10 @@ export class Fetch {
    */
   steerClear(i, c) {
     const f = this.director.flyers[i];
+    if (this.d[i].script) return;
+    // About to come too near all the same (low by the cliff, the flight floor lifting it up
+    // the face of it): off the wing and round, now.
+    if (this.veer(i)) return;
     const dx = this.head[0] - f.x;
     const dz = this.head[2] - f.z;
     const r = Math.hypot(dx, dz);
@@ -833,6 +842,58 @@ export class Fetch {
     c[0] = f.x + (ox * 0.8 + tx) * 40;
     c[2] = f.z + (oz * 0.8 + tz) * 40;
     c[1] = Math.min(Math.max(c[1], f.y - 6), f.y);
+  }
+
+  /**
+   * If where dragon i will be in a second and a half is within VEER_NEAR of the viewer's head,
+   * take it off the wing into a turn away: a smooth path, out from the ledge and round to the
+   * side it is turned toward, no harder a pull than a big animal can make, and nowhere on it
+   * nearer the head than SWOOP_CLEAR. Returns true if it veered.
+   */
+  veer(i) {
+    const f = this.director.flyers[i];
+    const v0 = [Math.sin(f.heading) * Math.cos(f.gamma) * f.speed, Math.sin(f.gamma) * f.speed, Math.cos(f.heading) * Math.cos(f.gamma) * f.speed];
+    const ahead = [f.x + v0[0] * 1.5, f.y + v0[1] * 1.5, f.z + v0[2] * 1.5];
+    const near = Math.hypot(ahead[0] - this.head[0], ahead[1] - this.head[1], ahead[2] - this.head[2]);
+    if (near > VEER_NEAR || Math.hypot(f.x - this.head[0], f.z - this.head[2]) > 70) return false;
+    const dx = f.x - this.head[0];
+    const dz = f.z - this.head[2];
+    const r = Math.hypot(dx, dz) || 1;
+    const ox = dx / r;
+    const oz = dz / r;
+    const s = this.sizes[i];
+    for (const side of [1, -1]) {
+      const tx = -oz * side;
+      const tz = ox * side;
+      for (const T of [2.2, 2.8, 3.4]) {
+        const out = Math.max(f.speed, 14);
+        const to = [f.x + (ox * 0.9 + tx * 0.6) * out * T * 0.6, Math.max(f.y, ground(f.x, f.z) + 8 * s), f.z + (oz * 0.9 + tz * 0.6) * out * T * 0.6];
+        const v1 = [(ox * 0.8 + tx * 0.6) * out, 0, (oz * 0.8 + tz * 0.6) * out];
+        if (!this.flyable([f.x, f.y, f.z], v0, to, v1, T, 30, s)) continue;
+        const d = this.d[i];
+        d.vel = v0;
+        const job = this.director.jobs[i];
+        d.script = {
+          moves: [{
+            name: 'veer', T, to, toVel: v1, heading: Math.atan2(v1[0], v1[2]),
+            pose: (g, u) => {
+              g.power = 0.8;
+              g.brake = 0.4 * (1 - u);
+              g.legs = 0;
+              g.pitch = 6 * DEG;
+              g.lookYaw = 0;
+              g.lookPitch = 0;
+            },
+            end: () => this.backOnTheWing(i, null),
+          }],
+          k: 0, t: 0, from: [f.x, f.y, f.z], fromVel: v0.slice(), heading: f.heading, started: false,
+        };
+        if (job && job.kind === 'fetch' && job.phase === 'chase') job.t = 0;
+        this.events.push({ type: 'veer', dragon: i });
+        return true;
+      }
+    }
+    return false;
   }
 
   flyJob(i, job, dt, carrot) {
@@ -1018,7 +1079,6 @@ export class Fetch {
     const theirs = other && other.kind === 'fetch' && other.phase === 'chase' ? this.eta(1 - i) : Infinity;
     if (mine <= theirs) {
       this.claim = i;
-      this.watch = 0;
       job.phase = 'approach';
       job.t = 0;
       job.scene = null;
@@ -1125,7 +1185,9 @@ export class Fetch {
       }
       const floor = Math.max(ground(POS[0], POS[2]), lakeDistance(POS[0], POS[2]) < 0 ? LAKE_LEVEL : -Infinity);
       const canopy = forestDensity(POS[0], POS[2]) > 0.3 ? canopyHeight(POS[0], POS[2]) : floor;
-      if (!last && POS[1] < Math.max(floor, canopy) + SWOOP_GROUND * s) return false;
+      // (Coming down to stop, no higher than where it is to stop: that is over the water or the ground already.)
+      const clearance = Math.max(floor, canopy) + SWOOP_GROUND * s;
+      if (!last && POS[1] < (landing ? Math.min(clearance, p1[1] - 0.5) : clearance)) return false;
       if (Math.hypot(POS[0] - this.head[0], POS[1] - this.head[1], POS[2] - this.head[2]) < SWOOP_CLEAR) return false;
       const speed = Math.hypot(VEL[0], VEL[1], VEL[2]);
       if (speed > 38 || (speed < 6 && !landing)) return false;
@@ -1313,17 +1375,41 @@ export class Fetch {
     const water = b.state === 'floating';
     const open = !water && forestDensity(b.x, b.z) < 0.3 && slopeAt(b.x, b.z) < 0.38 && canopyHeight(b.x, b.z) - ground(b.x, b.z) < 4;
     const kind = water ? 'water' : open ? 'land' : 'pluck';
-    // Round above the ball, a little way out from it, until a way down can be flown.
+    // Runs in over the ball, from far enough out to come down at the end of one: in toward it,
+    // and if it is not down by the time it is over it, out the far side and round again.
     const dx = f.x - b.x;
     const dz = f.z - b.z;
     const dl = Math.hypot(dx, dz) || 1;
-    const turn = 50 * DEG;
-    const cx = (dx / dl) * Math.cos(turn) - (dz / dl) * Math.sin(turn);
-    const cz = (dx / dl) * Math.sin(turn) + (dz / dl) * Math.cos(turn);
     const floor = water ? LAKE_LEVEL : Math.max(ground(b.x, b.z), canopyHeight(b.x, b.z));
-    carrot[0] = b.x + cx * 30;
-    carrot[2] = b.z + cz * 30;
-    carrot[1] = Math.max(floor, ground(carrot[0], carrot[2])) + 14;
+    if (!job.leg) job.leg = dl > 55 ? 'in' : 'out';
+    if (job.leg === 'out') {
+      // Out the way it is going (away from the ledge, if that is the way it is going anyway).
+      if (!job.outTo) {
+        let ux = Math.sin(f.heading);
+        let uz = Math.cos(f.heading);
+        const ax = b.x - this.head[0];
+        const az = b.z - this.head[2];
+        const al = Math.hypot(ax, az) || 1;
+        if ((ux * -ax + uz * -az) / al > 0.3) {
+          ux = ax / al;
+          uz = az / al;
+        }
+        job.outTo = [b.x + ux * 68, b.z + uz * 68];
+      }
+      carrot[0] = job.outTo[0];
+      carrot[2] = job.outTo[1];
+      if (Math.hypot(job.outTo[0] - f.x, job.outTo[1] - f.z) < 22 || dl > 75) {
+        job.leg = 'in';
+        job.outTo = null;
+      }
+    } else {
+      carrot[0] = b.x;
+      carrot[2] = b.z;
+      // Gone past it: out and round again.
+      const passing = (Math.sin(f.heading) * -dx + Math.cos(f.heading) * -dz) / dl < 0;
+      if (passing && dl < 30) job.leg = 'out';
+    }
+    carrot[1] = Math.max(floor, ground(carrot[0], carrot[2])) + 16;
     this.d[i].look = [b.x, b.y, b.z];
     if (this.time - (job.triedAt || -1) > 0.25) {
       job.triedAt = this.time;

@@ -16,11 +16,11 @@ import { BALL_RADIUS } from './fetch.js';
 import { hash2 } from './rng.js';
 
 /** The ball's colours, linear: its bright middle, its rim, and the veins. */
-const CORE = [1.0, 0.62, 0.2];
-const RIM = [0.95, 0.32, 0.05];
-const VEIN = [0.55, 0.16, 0.02];
+const CORE = [1.0, 0.5, 0.1];
+const RIM = [0.75, 0.2, 0.025];
+const VEIN = [0.42, 0.09, 0.01];
 /** How bright it glows, against a lit surface of the same colour. */
-const GLOW = 2.4;
+const GLOW = 1.15;
 /** The disc of light round it: its radius near to, and as a fraction of its distance far off. */
 const HALO_NEAR = 1.5;
 const HALO_FAR = 0.016;
@@ -84,7 +84,7 @@ export class BallView {
           // Brightest where it faces the eye, deeper amber toward its rim: a lit glass ball.
           float face = max(dot(n, toEye), 0.0);
           vec3 c = mix(vec3(${RIM.join(', ')}), vec3(${CORE.join(', ')}), face * face);
-          c = mix(c, vec3(${VEIN.join(', ')}), color.r * 0.8);
+          c = mix(c, vec3(${VEIN.join(', ')}), color.r);
           c *= ${GLOW.toFixed(2)} * (1.0 + 0.12 * uPulse);
           // It is its own light: little of the haze (as the dragons get less than the land).
           vec4 vp = viewMatrix * wp;

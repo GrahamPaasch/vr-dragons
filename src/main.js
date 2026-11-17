@@ -247,7 +247,7 @@ async function build() {
   // For the tools and tests, and for poking at it from a console.
   window.__dragons = {
     stage, view, state, THREE, dragons, director, audio, xr, governor, seek, fly, call, begin, applyQuality, frame,
-    game, ballView, throwFlat,
+    game, ballView, throwFlat, pose,
     ready: true,
     buildMs: state.buildMs,
     setFlatShot: () => {
