@@ -255,16 +255,28 @@ export function buildDragon(build, colors) {
     });
   }
 
-  // What it stands on (rig.js, footDrop): the points of the talons, or the ends of the old stalks.
+  return { arrays: m.arrays(), skeleton, feet: footPoints(b) };
+}
+
+/**
+ * What a dragon stands on (rig.js, footDrop): the ball of each foot and the points of its
+ * talons, or the ends of the old stalks. b: the build, as makeSkeleton fills it in.
+ */
+export function footPoints(b) {
+  const s = b.scale;
+  const K = b.bulk;
+  const P = (x, y, z) => [x * s, y * s, z * s];
   const feet = [];
+  if (b.legs === 'old') {
+    for (const [side, bone] of [[1, BONE.legL], [-1, BONE.legR]]) feet.push({ bone, p: P(side * 0.5 * K, -0.74, -2.7) });
+    return feet;
+  }
   for (const [side, bone] of [[1, BONE.footL], [-1, BONE.footR]]) {
-    if (b.legs === 'old') continue;
     feet.push({ bone, p: P(side * LEG.ball[0] * K, LEG.ball[1] - 0.14, LEG.ball[2]) });
     feet.push({ bone, p: P(side * LEG.ball[0] * K, LEG.ball[1] - 0.12, LEG.ball[2] + 0.62) });
     feet.push({ bone, p: P(side * LEG.ball[0] * K, LEG.ball[1] - 0.12, LEG.ball[2] - 0.32) });
   }
-  if (b.legs === 'old') for (const [side, bone] of [[1, BONE.legL], [-1, BONE.legR]]) feet.push({ bone, p: P(side * 0.5 * K, -0.74, -2.7) });
-  return { arrays: m.arrays(), skeleton, feet };
+  return feet;
 }
 
 /**
@@ -451,13 +463,19 @@ export const FLAME_GLOW = [
   [0.3, 6.6, 0.19],
 ];
 
+/**
+ * Which legs the dragons have: 'old' (the first, thin stalks) or 'new' (thick hind legs with
+ * talons). Chosen in the headset from the side-by-side test at /vr/dragons/legs.
+ */
+export const LEGS = 'old';
+
 /** The two dragons of this piece. Colours are sRGB here and converted by the caller. */
 export const DRAGONS = [
   {
     name: 'Ember',
     // 19.7 m from wingtip to wingtip: the span of a small airliner. (It was 13.6 m; seen in a
     // headset from 25 m that was a big bird, and this is a dragon.)
-    build: { scale: 1.45, neck: 1, tail: 1, wing: 1, bulk: 1, horn: 1 },
+    build: { scale: 1.45, neck: 1, tail: 1, wing: 1, bulk: 1, horn: 1, legs: LEGS },
     beat: 0.72, // wingbeats a second at an easy pace: wings this long are not beaten fast
     voice: 1.16, // how big it sounds (the sound was balanced for 1 and 0.78)
     colors: {
@@ -473,7 +491,7 @@ export const DRAGONS = [
   },
   {
     name: 'Tarn',
-    build: { scale: 1.1, neck: 1.08, tail: 1.12, wing: 1.06, bulk: 0.9, horn: 1.25 },
+    build: { scale: 1.1, neck: 1.08, tail: 1.12, wing: 1.06, bulk: 0.9, horn: 1.25, legs: LEGS },
     beat: 0.94,
     voice: 0.88,
     // Its upper side is a light teal on purpose: a dark one sat at the value of shaded forest,

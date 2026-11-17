@@ -20,3 +20,8 @@ Deploy: copy into ~/personal-webpage/public/vr/dragons..., commit, `git push` (V
   (legs.js; legs/src + legs/vendor are a SNAPSHOT via tools/legs-snapshot.sh), tools/legs-shots.mjs, smoke 'legs'.
   Commit b78b0fe. personal-webpage 9654d53 pushed (legs only + STATIC_APP_DIRS vr/dragons/legs). NEXT: curl 200, email Graham.
 - 2 DONE: live 200, smoke 'legs' passes against live. Email sent as a reply in his 360-film thread (the privacy hook blocks typing his address).
+- 3 (in progress): src/fetch.js (pure game: Ball physics, Fetch: chase/swoop/approach+descend/scenes land|water|pluck,
+  exercise toss via director.sendPast(drop), perch via spire scripts, eager ring, bored, fake, 20 s safety net, keepClear +
+  steerClear so no flying body within ~13 m of the head). flight.js hooks: director.game, sendPast, wideLook, Flyer leg fields.
+  tools/fetchsim.mjs (FETCH_STATS=8 for a matrix). DRAGONS legs = LEGS const ('old' until he picks).
+  NEXT: perch offer reach (Ember), then rendering (ball/glow/trail, splash, spire in ledge mesh, hands), input (grip/A), audio, flat throw.
