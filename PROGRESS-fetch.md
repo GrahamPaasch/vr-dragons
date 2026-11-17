@@ -15,3 +15,7 @@ Deploy: copy into ~/personal-webpage/public/vr/dragons..., commit, `git push` (V
 - 1 DONE: tags v1=fb467ed (v1 as live, per personal-webpage ec56829), v2=cf0efa2 (identical to live v2). Frozen copies in v1/ v2/
   (each index.html loads ../versions.js), versions.js at root (one list for all), serve.mjs + deploy-copy.sh know v1/v2/legs,
   smoke 'path' checks the lists. Deploy will need vr/dragons/v1, /v2, /legs in personal-webpage STATIC_APP_DIRS.
+- 2 (in progress): new legs in rig.js (28 bones: legL/R thigh, shinL/R, footL/R; pose: legs, reach, crouch, hipPitch, fold, neckRaise),
+  dragonGeometry buildLegs (build.legs 'new'|'old'; returns feet for rig.footDrop), wing FOLD found by search. legs/ page
+  (legs.js; legs/src + legs/vendor are a SNAPSHOT via tools/legs-snapshot.sh), tools/legs-shots.mjs, smoke 'legs'.
+  Commit b78b0fe. personal-webpage 9654d53 pushed (legs only + STATIC_APP_DIRS vr/dragons/legs). NEXT: curl 200, email Graham.
