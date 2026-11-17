@@ -61,8 +61,8 @@ try {
         d.stage.camera.fov = fov || 70;
         d.stage.camera.updateProjectionMatrix();
       },
-      start(mode) {
-        d.director.seed = 11;
+      start(mode, seed) {
+        d.director.seed = seed || 11;
         d.director.reset();
         d.director.drain();
         d.game.setHands(false);
@@ -150,7 +150,13 @@ try {
     const thrash = await page.evaluate(() => {
       const f = window.__fetch;
       const d = window.__dragons;
-      const found = f.until(() => d.game.d.some((x) => x.script && x.script.moves[x.script.k].name === 'thrash'), 40);
+      let found = f.until(() => d.game.d.some((x) => x.script && x.script.moves[x.script.k].name === 'thrash'), 40);
+      for (const [seed, hand] of [[2, 6], [4, 6], [7, 5.5], [9, 6.5]]) {
+        if (found >= 0) break;
+        f.start('exercise', seed);
+        f.grabAndThrow(hand, 0);
+        found = f.until(() => d.game.d.some((x) => x.script && x.script.moves[x.script.k].name === 'thrash'), 60);
+      }
       f.until(() => false, 1.2);
       const i = d.game.d.findIndex((x) => x.script);
       const g = d.director.flyers[Math.max(i, 0)];
@@ -164,9 +170,14 @@ try {
     const info = await page.evaluate(() => {
       const f = window.__fetch;
       const d = window.__dragons;
-      f.start('exercise');
-      f.grabAndThrow(4, 0);
-      const found = f.until(() => d.game.d.some((x) => x.script && x.script.moves[x.script.k].name === 'joy'), 60);
+      // (Throws until one comes down on open ground.)
+      let found = -1;
+      for (const [seed, hand] of [[11, 3], [2, 3], [5, 2.5], [8, 3.5], [3, 2]]) {
+        f.start('exercise', seed);
+        f.grabAndThrow(hand, 0);
+        found = f.until(() => d.game.d.some((x) => x.script && x.script.moves[x.script.k].name === 'joy'), 60);
+        if (found >= 0) break;
+      }
       f.until(() => false, 0.9);
       const i = d.game.d.findIndex((x) => x.script);
       const g = d.director.flyers[Math.max(i, 0)];

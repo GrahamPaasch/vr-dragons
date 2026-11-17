@@ -808,7 +808,8 @@ function wireControls(canvas) {
   });
   window.addEventListener('keydown', (e) => {
     if (e.repeat || e.altKey || e.ctrlKey || e.metaKey) return;
-    if (e.target && /^(BUTTON|INPUT|TEXTAREA|SELECT|A)$/.test(e.target.tagName) && e.code !== 'KeyM') return;
+    // (M, T and A work wherever the focus is; Space and Enter on a button press the button.)
+    if (e.target && /^(BUTTON|INPUT|TEXTAREA|SELECT|A)$/.test(e.target.tagName) && !/^Key[MTA]$/.test(e.code)) return;
     if (e.code === 'Space' || e.code === 'Enter') {
       if (!state.begun) watchHere();
       else call();

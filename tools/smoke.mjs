@@ -4,7 +4,7 @@
  * would, on a flat screen and inside an emulated Oculus Quest 1.
  *
  *   npm run smoke
- *   SMOKE_ONLY=flat,quest1 npm run smoke     some of the parts: flat, phone, path, quest1, legs, no3d
+ *   SMOKE_ONLY=flat,quest1 npm run smoke     some of the parts: flat, phone, fetch, path, quest1, legs, no3d
  *   SMOKE_CHANNEL=chrome npm run smoke       in the installed Google Chrome instead
  *   SMOKE_EXECUTABLE=/path/to/chrome npm run smoke
  *   SMOKE_URL=https://www.grahampaasch.com/vr/dragons npm run smoke    the page as deployed
@@ -508,6 +508,45 @@ async function phone(browser, base) {
     assert.deepEqual(problems, []);
   });
   await context.close();
+}
+
+/** Fetch on a flat screen: T held and let go throws the ball, A switches the mode, and the two go after it. */
+async function flatFetch(browser, url) {
+  console.log('\nFetch on a flat screen');
+  const { page, context, problems } = await open(browser, url + '?seed=5');
+  try {
+    await check('holding T throws the ball out over the valley, harder the longer it is held, and both dragons go after it', async () => {
+      await page.click('#watch');
+      await page.waitForFunction(() => window.__dragons.state.begun, null, { timeout: 5000 });
+      await frames(page, 3);
+      assert.equal(await app(page, () => window.__dragons.game.ball.state), 'rest');
+      await page.keyboard.down('KeyT');
+      await page.waitForTimeout(900);
+      await page.keyboard.up('KeyT');
+      await frames(page, 2);
+      const b = await app(page, () => {
+        const g = window.__dragons.game;
+        return { state: g.ball.state, speed: Math.hypot(g.ball.vx, g.ball.vy, g.ball.vz) };
+      });
+      assert.equal(b.state, 'flying');
+      assert.ok(b.speed > 12, 'thrown: ' + b.speed.toFixed(1) + ' m/s');
+      await app(page, () => window.__dragons.fly(2));
+      const jobs = await app(page, () => window.__dragons.director.jobs.map((j) => (j ? j.phase : null)));
+      assert.ok(jobs.filter(Boolean).length >= 1, 'after it: ' + JSON.stringify(jobs));
+      assert.equal(await page.isVisible('#throwChip'), true, 'a button for it too');
+    });
+    await check('A switches how they bring it back, and the button says which', async () => {
+      const before = await page.textContent('#modeChip');
+      await page.keyboard.press('KeyA');
+      await frames(page, 2);
+      const after = await page.textContent('#modeChip');
+      assert.notEqual(after, before);
+      assert.match(after, /Perch|Exercise/);
+      assert.deepEqual(problems, []);
+    });
+  } finally {
+    await context.close();
+  }
 }
 
 async function liveSitePath(browser) {
@@ -1123,6 +1162,7 @@ try {
   const wanted = (name) => only.length === 0 || only.includes(name);
   if (wanted('flat')) await flatScreen(browser, url);
   if (wanted('phone')) await phone(browser, url);
+  if (wanted('fetch')) await flatFetch(browser, url);
   if (wanted('path') && !LIVE) await liveSitePath(browser);
   if (wanted('quest1')) await quest1(browser, url);
   if (wanted('legs')) await legsPage(browser, LIVE ? url.replace(/\/?$/, '/legs') : null);
