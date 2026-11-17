@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Copy the static site (index.html, src/, vendor/) into a folder that a web server publishes.
+# Copy the static site (index.html, versions.js, src/, vendor/, and the pages of their own in
+# v1/, v2/ and legs/) into a folder that a web server publishes.
 #
 #   tools/deploy-copy.sh ~/personal-webpage/public/vr/dragons
 #
@@ -26,9 +27,12 @@ fi
 
 mkdir -p "$target"
 cp "$root/index.html" "$target/index.html"
-rm -rf "$target/src" "$target/vendor"
-cp -R "$root/src" "$target/src"
-cp -R "$root/vendor" "$target/vendor"
+cp "$root/versions.js" "$target/versions.js"
+for d in src vendor v1 v2 legs; do
+  rm -rf "${target:?}/$d"
+  if [ -d "$root/$d" ]; then cp -R "$root/$d" "$target/$d"; fi
+done
 
-echo "Copied index.html, src/ and vendor/ to $target"
-echo "If this is the grahampaasch.com repo, 'vr/dragons' must be in STATIC_APP_DIRS in next.config.mjs."
+echo "Copied index.html, versions.js, src/, vendor/, v1/, v2/ and legs/ to $target"
+echo "If this is the grahampaasch.com repo, vr/dragons, vr/dragons/v1, vr/dragons/v2 and"
+echo "vr/dragons/legs must be in STATIC_APP_DIRS in next.config.mjs."

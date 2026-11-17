@@ -89,6 +89,11 @@ body.tools #veil,body.tools #hud,body.tools #hint{display:none}
     document.getElementById('note').textContent = 'The page could not load its code. Check the connection and reload.';
   };
   document.head.appendChild(s);
+  // The list of versions on the card (one list for all of them, kept at the newest one's root).
+  var v = document.createElement('script');
+  v.src = dir + 'versions.js';
+  v.setAttribute('data-current', 'v3');
+  document.head.appendChild(v);
 })();
 </script>
 </body>

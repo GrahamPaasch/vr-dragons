@@ -34,7 +34,9 @@ const TYPES = {
 };
 
 /** The only things a deployed copy contains (see README, "Deploying"). */
-const PUBLIC = ['index.html', 'src', 'vendor'];
+export const PUBLIC = ['index.html', 'src', 'vendor', 'versions.js', 'v1', 'v2', 'legs'];
+/** Folders under the page that are pages of their own (older versions, the legs test). */
+const SUBPAGES = ['v1', 'v2', 'legs'];
 
 export function createServer(options) {
   const mount = ((options && options.mount) || '').replace(/\/+$/, '');
@@ -55,6 +57,14 @@ export function createServer(options) {
         else return notFound(res);
       } else if (pathname === '/') {
         pathname = '/index.html';
+      }
+      // The older versions and the legs test answer at /v2 (no slash) the same way.
+      const sub = pathname.replace(/^\/+/, '');
+      if (SUBPAGES.includes(sub)) pathname = '/' + sub + '/index.html';
+      else if (SUBPAGES.includes(sub.replace(/\/$/, '')) && sub.endsWith('/')) {
+        res.writeHead(308, { Location: (mount || '') + '/' + sub.replace(/\/$/, '') + url.search });
+        res.end();
+        return;
       }
 
       const relative = path.normalize(pathname).replace(/^[/\\]+/, '');

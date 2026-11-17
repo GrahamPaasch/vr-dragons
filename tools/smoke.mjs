@@ -523,6 +523,26 @@ async function liveSitePath(browser) {
         await context.close();
       });
     }
+    // The older versions, frozen, each at its own address, and the list of them on every card.
+    for (const [suffix, current] of [['/vr/dragons', 'v3'], ['/vr/dragons/v2', 'v2'], ['/vr/dragons/v1', 'v1']]) {
+      await check('version list at ' + suffix + ' (this one ' + current + ')', async () => {
+        const { page, context, problems } = await open(browser, 'http://localhost:' + port + suffix);
+        await page.waitForSelector('#versions');
+        await frames(page, 3);
+        const list = await page.$$eval('#versions a, #versions strong', (els) => els.map((e) => ({ tag: e.tagName, text: e.textContent, href: e.getAttribute('href') })));
+        assert.equal(list.length, 3, 'three versions listed');
+        assert.equal(list.filter((e) => e.tag === 'STRONG').length, 1);
+        assert.ok(list.find((e) => e.tag === 'STRONG').text.startsWith(current), 'this one is marked');
+        for (const e of list.filter((x) => x.tag === 'A')) assert.match(e.href, /^\/vr\/dragons(\/v\d)?$/);
+        assert.deepEqual(problems, []);
+        await context.close();
+      });
+    }
+    await check('/vr/dragons/v2/ redirects to /vr/dragons/v2', async () => {
+      const res = await fetch('http://localhost:' + port + '/vr/dragons/v2/', { redirect: 'manual' });
+      assert.equal(res.status, 308);
+      assert.equal(res.headers.get('location'), '/vr/dragons/v2');
+    });
   } finally {
     server.close();
   }
