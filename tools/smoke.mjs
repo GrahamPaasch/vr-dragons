@@ -637,7 +637,7 @@ async function quest1(browser, base) {
         placed: d.xr.placed,
         begun: d.state.begun,
         time: d.director.time,
-        hint: d.stage.hint.showing && d.stage.hint.text,
+        hint: d.stage.hint.showing && d.stage.hint.lines[d.stage.hint.line],
         audio: d.audio.running,
         veilGone: document.getElementById('veil').classList.contains('gone'),
         hud: !document.getElementById('hud').hidden,
@@ -657,7 +657,7 @@ async function quest1(browser, base) {
     assert.equal(s.rig[1], 0, 'never up or down');
     assert.equal(s.begun, true);
     assert.ok(s.time < 2, 'the flight starts from its opening: ' + s.time.toFixed(2) + ' s in');
-    assert.match(s.hint, /trigger/, 'the headset is told how to call');
+    assert.match(s.hint, /Grip to pick up the ball/, 'the headset is told how to pick up the ball and throw it (the trigger comes later)');
     assert.equal(s.audio, true);
     assert.equal(s.veilGone, true);
     assert.equal(s.hud, false, 'no page controls while in the headset');
@@ -762,6 +762,77 @@ async function quest1(browser, base) {
     assert.equal(s.calls, before.calls + 1);
     assert.equal(s.jobs.filter(Boolean).length, 1, 'one dragon has turned toward the ledge');
     assert.equal(s.whistles, before.whistles + 1);
+    assert.deepEqual(problems, []);
+  });
+
+  await check('fetch: the grip takes the ball from the rock, a swing and letting go throws it out over the valley, and both dragons go after it', async () => {
+    // Where a point in the world is in the headset's own space (the valley was put under the
+    // person by moving the rig: see xr.place).
+    const toLocal = (p) =>
+      app(page, (q) => {
+        const v = new window.__dragons.THREE.Vector3(q[0], q[1], q[2]);
+        window.__dragons.stage.rig.worldToLocal(v);
+        return [v.x, v.y, v.z];
+      }, p);
+    const ball = await app(page, () => {
+      const d = window.__dragons;
+      d.game.reset();
+      d.game.setHands(true);
+      return [d.game.ball.x, d.game.ball.y, d.game.ball.z, d.game.ball.state];
+    });
+    assert.equal(ball[3], 'rest', 'the ball is on the rock beside them');
+    // Reach down to it (a squat), and close the grip.
+    const at = await toLocal([ball[0] - 0.05, ball[1] + 0.3, ball[2]]);
+    await app(page, (q) => window.__xrDevice.controllers.right.position.set(q[0], q[1], q[2]), at);
+    await frames(page, 3);
+    await app(page, () => window.__xrDevice.controllers.right.updateButtonValue('squeeze', 1));
+    await frames(page, 3);
+    const held = await app(page, () => ({ state: window.__dragons.game.ball.state, eager: window.__dragons.game.eager, hand: window.__dragons.game.ball.hand }));
+    assert.equal(held.state, 'held', 'the grip took it');
+    assert.equal(held.eager, true, 'and the dragons are interested');
+    // A swing: forward and up, a frame at a time, and let go at the end of it.
+    const swing = await app(page, async () => {
+      const d = window.__dragons;
+      const c = window.__xrDevice.controllers.right;
+      const wait = (n) =>
+        new Promise((resolve) => {
+          const start = d.stage.renderer.info.render.frame;
+          const tick = () => (d.stage.renderer.info.render.frame >= start + n ? resolve() : setTimeout(tick, 4));
+          tick();
+        });
+      const t0 = performance.now();
+      const from = c.position.clone();
+      for (let k = 1; k <= 6; k++) {
+        c.position.set(from.x, from.y + 0.1 * k, from.z - 0.3 * k);
+        await wait(1);
+      }
+      const ms = performance.now() - t0;
+      c.updateButtonValue('squeeze', 0);
+      await wait(2);
+      const b = d.game.ball;
+      return { state: b.state, speed: Math.hypot(b.vx, b.vy, b.vz), ms, handSpeed: (Math.hypot(0.6, 1.8) / ms) * 1000 };
+    });
+    assert.equal(swing.state, 'flying', 'it was thrown: ' + JSON.stringify(swing));
+    assert.ok(swing.speed > 4, 'and it left the hand faster than the hand moved: ' + swing.speed.toFixed(1) + ' m/s');
+    await app(page, () => window.__dragons.fly(1.5));
+    await frames(page, 2);
+    const chase = await app(page, () => window.__dragons.director.jobs.map((j) => (j && j.kind === 'fetch' ? j.phase : j ? 'pass' : null)));
+    assert.ok(chase.filter((j) => j === 'chase' || j === 'scene' || j === 'approach').length >= 1, 'the dragons are after it: ' + JSON.stringify(chase));
+    assert.deepEqual(problems, []);
+  });
+
+  await check('fetch: A switches between exercise and perch, and says which in the headset', async () => {
+    const before = await app(page, () => window.__dragons.game.mode);
+    await app(page, () => window.__xrDevice.controllers.right.updateButtonValue('a-button', 1));
+    await frames(page, 3);
+    await app(page, () => window.__xrDevice.controllers.right.updateButtonValue('a-button', 0));
+    await frames(page, 3);
+    const s = await app(page, () => ({ mode: window.__dragons.game.mode, line: window.__dragons.stage.hint.lines[window.__dragons.stage.hint.line], showing: window.__dragons.stage.hint.showing }));
+    assert.notEqual(s.mode, before);
+    assert.equal(s.showing, true);
+    assert.match(s.line, s.mode === 'perch' ? /Perch/ : /Exercise/);
+    // (Back as it was, for what follows.)
+    await app(page, () => window.__dragons.game.reset());
     assert.deepEqual(problems, []);
   });
 

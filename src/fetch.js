@@ -1853,7 +1853,10 @@ export class Fetch {
     });
     moves.push({
       name: 'turn', T: 2.2, heading: toViewer, standOn: SPIRE.top,
-      plan: () => ({ to: bodyAt(toViewer).map((v, k) => (k === 1 ? f.y : v)), toVel: [0, 0, 0] }),
+      plan: () => {
+        const at = bodyAt(toViewer);
+        return { to: [at[0] - Math.sin(toViewer) * offerPose.back, f.y, at[2] - Math.cos(toViewer) * offerPose.back], toVel: [0, 0, 0] };
+      },
       pose: (g, u) => {
         g.power = 0;
         g.brake = 0.3 * (1 - u);
@@ -1935,8 +1938,13 @@ export class Fetch {
     const tz = SPIRE.z - this.head[2];
     const tl = Math.hypot(tx, tz) || 1;
     const target = [this.head[0] + (tx / tl) * 0.62, this.head[1] - 0.45, this.head[2] + (tz / tl) * 0.62];
-    const p = { crouch: 0.2, neckRaise: 0.2, lookPitch: 0, lookYaw: 0, pitch: 12 * DEG };
+    const p = { crouch: 0.2, neckRaise: 0.2, lookPitch: 0, lookYaw: 0, pitch: 12 * DEG, back: 0 };
+    // (back: how far back from where it was put it stands, along the line to the viewer.)
+    const ux = Math.sin(heading);
+    const uz = Math.cos(heading);
     const cost = (q) => {
+      f.x = bodyXZ[0] - ux * q.back;
+      f.z = bodyXZ[2] - uz * q.back;
       f.crouch = q.crouch;
       f.neckRaise = q.neckRaise;
       f.lookPitch = q.lookPitch;
@@ -1946,9 +1954,9 @@ export class Fetch {
       f.y = SPIRE.top + body.drop(f);
       body.mouth(f, TMP_S);
       // (And a little against bending far from a natural pose.)
-      return Math.hypot(TMP_S[0] - target[0], TMP_S[1] - target[1], TMP_S[2] - target[2]) + 0.05 * (Math.abs(q.lookPitch) + Math.abs(q.neckRaise));
+      return Math.hypot(TMP_S[0] - target[0], TMP_S[1] - target[1], TMP_S[2] - target[2]) + 0.04 * (Math.abs(q.lookPitch) + Math.abs(q.neckRaise) + Math.abs(q.pitch));
     };
-    const keys = [['crouch', 0, 0.8], ['neckRaise', -0.6, 0.9], ['lookPitch', -1.0, 0.8], ['lookYaw', -0.6, 0.6], ['pitch', -10 * DEG, 30 * DEG]];
+    const keys = [['crouch', 0, 1], ['neckRaise', -0.9, 0.9], ['lookPitch', -1.4, 0.8], ['lookYaw', -0.6, 0.6], ['pitch', -24 * DEG, 30 * DEG], ['back', -0.7 * SPIRE.radius, 0.35 * SPIRE.radius]];
     let c = cost(p);
     for (let step = 0.3; step > 0.003; step *= 0.6) {
       let better = true;

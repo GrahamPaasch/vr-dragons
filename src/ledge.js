@@ -255,10 +255,14 @@ function litter(m, surface, seed, count) {
 
 /**
  * Build everything. surface(x, z): height of the drawn ground (see terrain.surfaceNear).
+ * options: { spire: { x, z, top, radius } } to stand the perching spire there too.
  * Returns { arrays, trees: [{ x, y, z, radius, kind, phase }], triangles }.
  */
-export function buildLedge(surface, seed) {
+export function buildLedge(surface, seed, options) {
   const m = new MeshBuilder();
+  // The rock spire a dragon perches on to hand the ball back (fetch.js, SPIRE), part of this mesh.
+  const spire = options && options.spire;
+  if (spire) buildSpire(m, spire.x, spire.z, spire.top, spire.radius, ground(spire.x, spire.z), seed + 4242);
   const trees = [];
   HERO_TREES.forEach((spec, i) => {
     const base = Math.min(ground(spec.x, spec.z), surface(spec.x, spec.z));

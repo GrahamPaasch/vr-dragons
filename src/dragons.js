@@ -8,13 +8,14 @@
 
 import { THREE, dragonMaterial, flameMaterial } from './shaders.js';
 import { buildDragon, buildFlame, DRAGONS } from './dragonGeometry.js';
-import { BONE, BONE_COUNT, restPose, poseSkeleton, poseFromFlyer, heave, footDrop } from './rig.js';
+import { BONE, BONE_COUNT, restPose, poseSkeleton, poseFromFlyer, heave, footDrop, skinPoint } from './rig.js';
 import { ROAR_SECONDS } from './flight.js';
 import * as W from './world.js';
 
 const tmpEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const tmpUp = new THREE.Vector3();
 const tmpBone = new THREE.Matrix4();
+const tmpPoint = new THREE.Vector3();
 
 /**
  * How hard a dragon is breathing fire, 0..1, from how much of its roar is left (seconds): the
@@ -96,6 +97,16 @@ export class DragonView {
     const pose = poseFromFlyer(this.pose, f, (time + this.scale * 10) / Math.sqrt(this.scale));
     poseSkeleton(this.skeleton, pose, this.world, this.skin);
     return footDrop(this.skin, this.feet, f.pitch);
+  }
+
+  /** Where a rest-pose point carried by the head (p: model space) is in the world, as last drawn. */
+  pointOnHead(p, out) {
+    skinPoint(this.skin, BONE.head, p, out);
+    tmpPoint.set(out[0], out[1], out[2]).applyMatrix4(this.mesh.matrix);
+    out[0] = tmpPoint.x;
+    out[1] = tmpPoint.y;
+    out[2] = tmpPoint.z;
+    return out;
   }
 
   /**
