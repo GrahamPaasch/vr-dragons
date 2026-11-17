@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BONE, BONE_COUNT, makeSkeleton, poseSkeleton, restPose, heave, skinPoint } from '../src/rig.js';
+import { BONE, BONE_COUNT, makeSkeleton, poseSkeleton, restPose, heave, skinPoint, footDrop } from '../src/rig.js';
 import { buildDragon, buildFlame, DRAGONS, FLAME_GLOW } from '../src/dragonGeometry.js';
 import { ROAR_SECONDS } from '../src/flight.js';
 import { makeRng } from '../src/rng.js';
@@ -166,10 +166,11 @@ test('whatever the pose, the dragon stays inside the sphere it is culled by, and
   }
 });
 
-test('the skeleton: 24 bones, parents before children, and the head turns to look', () => {
+test('the skeleton: 28 bones, parents before children, and the head turns to look', () => {
   const sk = makeSkeleton(DRAGONS[0].build);
   assert.equal(sk.pos.length, BONE_COUNT);
-  assert.equal(BONE_COUNT, 24);
+  assert.equal(BONE_COUNT, 28);
+  for (let i = 0; i < BONE_COUNT; i++) assert.ok(sk.parent[i] < i, 'bone ' + i + ' comes after its parent');
   const world = new Float32Array(BONE_COUNT * 12);
   const skin = new Float32Array(BONE_COUNT * 12);
   // (Places on the animal are given for a dragon of size 1, and grow with it.)
@@ -238,4 +239,61 @@ test('fire: a spray of tongues from the mouth, pointing the way the snout does, 
     const order = [...discs.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1].most);
     for (let i = 1; i < order.length; i++) assert.ok(order[i] < order[i - 1], 'wider is dimmer');
   }
+});
+
+test('legs: tucked up behind in flight, let down to stand on, thrust forward to land; old legs kept for the test', () => {
+  for (const spec of DRAGONS) {
+    for (const legs of ['new', 'old']) {
+      const built = buildDragon(Object.assign({}, spec.build, { legs }), spec.colors);
+      const sk = built.skeleton;
+      const world = new Float32Array(BONE_COUNT * 12);
+      const skin = new Float32Array(BONE_COUNT * 12);
+      assert.ok(built.feet.length >= 2, 'it has feet to stand on');
+      const lowest = (pose) => {
+        poseSkeleton(sk, Object.assign(restPose(), pose), world, skin);
+        let low = [0, Infinity, 0];
+        for (const f of built.feet) {
+          const p = skinPoint(skin, f.bone, f.p, [0, 0, 0]);
+          if (p[1] < low[1]) low = p;
+        }
+        return { low, drop: footDrop(skin, built.feet, 0) };
+      };
+      const s = sk.build.scale;
+      const flying = lowest({ legs: 0 });
+      const standing = lowest({ legs: 1 });
+      const landing = lowest({ legs: 1, reach: 1 });
+      const crouched = lowest({ legs: 1, crouch: 1 });
+      assert.ok(Math.abs(standing.drop + standing.low[1]) < 1e-6, 'footDrop is how far below the origin the lowest foot is');
+      assert.ok(standing.low[1] < flying.low[1] - 0.4 * s, spec.name + ' ' + legs + ': the feet hang lower to stand than to fly');
+      if (legs === 'new') {
+        assert.ok(standing.drop > 2.2 * s && standing.drop < 3.2 * s, 'it stands on legs ' + (standing.drop / s).toFixed(2) + ' long (size 1)');
+        assert.ok(flying.low[2] < standing.low[2] - 0.6 * s, 'in flight the feet are drawn back under the tail');
+        assert.ok(landing.low[2] > standing.low[2] + 0.4 * s, 'to land, the feet reach forward');
+        assert.ok(crouched.drop < standing.drop - 0.3 * s, 'crouched, it is lower');
+        assert.ok(built.arrays.triangles < 1000, 'triangles with the new legs: ' + built.arrays.triangles);
+      }
+    }
+  }
+});
+
+test('wings folded at its sides: nothing reaches out more than a little way from the body', () => {
+  const sk = makeSkeleton(DRAGONS[0].build);
+  const world = new Float32Array(BONE_COUNT * 12);
+  const skin = new Float32Array(BONE_COUNT * 12);
+  const s = sk.build.scale;
+  const span = (fold) => {
+    poseSkeleton(sk, Object.assign(restPose(), { fold }), world, skin);
+    let wide = 0;
+    let high = -Infinity;
+    for (const [bone, p] of [[BONE.handL, sk.wingL.tip1], [BONE.finger2L, sk.wingL.tip2], [BONE.finger3L, sk.wingL.tip3], [BONE.handL, sk.wingL.wrist], [BONE.forearmL, sk.wingL.elbow]]) {
+      const q = skinPoint(skin, bone, p, [0, 0, 0]);
+      wide = Math.max(wide, Math.abs(q[0]));
+      high = Math.max(high, q[1]);
+    }
+    return { wide, high };
+  };
+  assert.ok(span(0).wide > 6 * s, 'spread: ' + span(0).wide.toFixed(1));
+  const folded = span(1);
+  assert.ok(folded.wide < 1.4 * s, 'folded, no joint or tip is more than ' + (folded.wide / s).toFixed(2) + ' out from the middle (size 1)');
+  assert.ok(folded.high < 1.6 * s, 'and nothing stands up over its back: ' + (folded.high / s).toFixed(2));
 });

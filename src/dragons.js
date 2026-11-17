@@ -8,7 +8,7 @@
 
 import { THREE, dragonMaterial, flameMaterial } from './shaders.js';
 import { buildDragon, buildFlame, DRAGONS } from './dragonGeometry.js';
-import { BONE, BONE_COUNT, restPose, poseSkeleton, poseFromFlyer, heave } from './rig.js';
+import { BONE, BONE_COUNT, restPose, poseSkeleton, poseFromFlyer, heave, footDrop } from './rig.js';
 import { ROAR_SECONDS } from './flight.js';
 import * as W from './world.js';
 
@@ -29,14 +29,16 @@ export function firePower(roarLeft) {
 }
 
 export class DragonView {
-  constructor(stage, index) {
+  /** override: changes to the build (the legs test draws the same dragon with { legs: 'old' }). */
+  constructor(stage, index, override) {
     const spec = DRAGONS[index];
     this.spec = spec;
     this.stage = stage;
     const colors = {};
     for (const k of Object.keys(spec.colors)) colors[k] = W.srgb(spec.colors[k][0], spec.colors[k][1], spec.colors[k][2]);
-    const built = buildDragon(spec.build, colors);
+    const built = buildDragon(Object.assign({}, spec.build, override || {}), colors);
     this.skeleton = built.skeleton;
+    this.feet = built.feet;
     this.scale = built.skeleton.build.scale;
     this.world = new Float32Array(BONE_COUNT * 12);
     this.skin = new Float32Array(BONE_COUNT * 12);
@@ -84,6 +86,16 @@ export class DragonView {
     this.flame.visible = false;
     stage.scene.add(this.flame);
     this.fire = 0;
+  }
+
+  /**
+   * How far below its origin this dragon's feet would be, posed as `f` has it (metres): what
+   * to add to the height of what it stands on to set it down there. (Poses the skeleton.)
+   */
+  footDrop(f, time) {
+    const pose = poseFromFlyer(this.pose, f, (time + this.scale * 10) / Math.sqrt(this.scale));
+    poseSkeleton(this.skeleton, pose, this.world, this.skin);
+    return footDrop(this.skin, this.feet, f.pitch);
   }
 
   /**

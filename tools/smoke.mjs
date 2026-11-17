@@ -4,7 +4,7 @@
  * would, on a flat screen and inside an emulated Oculus Quest 1.
  *
  *   npm run smoke
- *   SMOKE_ONLY=flat,quest1 npm run smoke     some of the parts: flat, phone, path, quest1, no3d
+ *   SMOKE_ONLY=flat,quest1 npm run smoke     some of the parts: flat, phone, path, quest1, legs, no3d
  *   SMOKE_CHANNEL=chrome npm run smoke       in the installed Google Chrome instead
  *   SMOKE_EXECUTABLE=/path/to/chrome npm run smoke
  *   SMOKE_URL=https://www.grahampaasch.com/vr/dragons npm run smoke    the page as deployed
@@ -550,6 +550,54 @@ async function liveSitePath(browser) {
 
 // ---------------------------------------------------------------------------------------------
 
+/** The legs test page (legs/): it loads, and in an emulated Quest 1 it draws both eyes within the budget. */
+async function legsPage(browser, liveUrl) {
+  console.log('\nThe legs test page, in an emulated Oculus Quest 1');
+  const local = liveUrl ? null : await listen({ mount: '/vr/dragons' });
+  const url = liveUrl || 'http://localhost:' + local.port + '/vr/dragons/legs';
+  const { page, context, problems } = await open(browser, url, { xr: true, stereo: true, noWait: true, viewport: { width: 1280, height: 720 } });
+  try {
+    await check('the legs page builds and offers VR', async () => {
+      await page.waitForFunction(() => window.__legs && window.__legs.ready, null, { timeout: 90000 });
+      await page.waitForFunction(() => !document.getElementById('enterVR').disabled, null, { timeout: 10000 });
+    });
+    await check('in VR both eyes are drawn, old and new legs side by side, within the budget', async () => {
+      await app(page, () => {
+        const d = window.__xrDevice;
+        d.position.set(0, 1.7, 0);
+      });
+      await page.click('#enterVR');
+      await page.waitForFunction(() => window.__legs.stage.renderer.xr.isPresenting, null, { timeout: 15000 });
+      await page.waitForTimeout(1500);
+      const info = await app(page, () => {
+        const r = window.__legs.stage.renderer;
+        r.info.autoReset = false;
+        r.info.reset();
+        // (Counted over several frames, and divided by how many there were.)
+        return new Promise((resolve) => {
+          const start = r.info.render.frame;
+          const wait = () => {
+            const n = r.info.render.frame - start;
+            if (n >= 5) resolve({ calls: r.info.render.calls / n, triangles: r.info.render.triangles / n, eyes: r.xr.getCamera().cameras.length });
+            else setTimeout(wait, 8);
+          };
+          wait();
+        });
+      });
+      assert.equal(info.eyes, 2);
+      assert.ok(info.calls / 2 <= BUDGET.calls, 'draw calls an eye: ' + info.calls / 2);
+      assert.ok(info.triangles / 2 <= BUDGET.triangles, 'triangles an eye: ' + info.triangles / 2);
+      console.log('        (' + info.calls / 2 + ' draw calls and ' + Math.round(info.triangles / 2) + ' triangles an eye)');
+      const legs = await app(page, () => window.__legs.views.map((pair) => pair.map((v) => v.skeleton.build.legs + ':' + v.triangles)));
+      assert.deepEqual(legs.map((p) => p.map((x) => x.split(':')[0])), [['old', 'new'], ['old', 'new']]);
+      assert.deepEqual(problems, []);
+    });
+  } finally {
+    await context.close();
+    if (local) local.server.close();
+  }
+}
+
 async function quest1(browser, base) {
   console.log('\nInside an emulated Oculus Quest 1 (WebXR immersive-vr)');
   // (?governor=off: software drawing is slow, and the budget check must count the whole picture.)
@@ -1006,6 +1054,7 @@ try {
   if (wanted('phone')) await phone(browser, url);
   if (wanted('path') && !LIVE) await liveSitePath(browser);
   if (wanted('quest1')) await quest1(browser, url);
+  if (wanted('legs')) await legsPage(browser, LIVE ? url.replace(/\/?$/, '/legs') : null);
   if (wanted('no3d')) await no3D(url);
 } finally {
   if (browser) await browser.close();
